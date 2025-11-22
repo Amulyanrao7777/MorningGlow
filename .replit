@@ -1,0 +1,31 @@
+modules = ["python-3.11"]
+[agent]
+expertMode = true
+integrations = ["web_scraper:1.0.0", "python_openai:1.0.0"]
+
+[nix]
+channel = "stable-25_05"
+packages = ["xcodebuild", "zlib"]
+
+[workflows]
+runButton = "Project"
+
+[[workflows.workflow]]
+name = "Project"
+mode = "parallel"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "MorningGlow"
+
+[[workflows.workflow]]
+name = "MorningGlow"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "python morningglow.py"
+
+[workflows.workflow.metadata]
+outputType = "console"
