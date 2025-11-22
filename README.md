@@ -5,13 +5,13 @@ A production-grade, emotionally-safe news curation system that delivers beautifu
 ## ✨ Features
 
 - **Real-Time News Fetching**: Pulls verified news from NewsAPI and Google News RSS feeds
-- **Amulya Filter System**: 9-category emotional safety filter ensuring only gentle, positive content
+- **A Filter System**: 9-category emotional safety filter ensuring only gentle, positive content
 - **Factual Accuracy Guardian**: Rejects speculation, clickbait, and unverified claims
 - **AI-Powered Summaries**: Warm, feminine summaries (6-7 sentences, 150-170 words) using OpenAI
 - **Content Guarantee**: Always delivers 3-5 beautiful stories with emergency fallback stories
 - **Beautiful HTML Emails**: Soft pink/rose aesthetic with gentle typography and daily affirmations
 
-## 🌿 The Amulya Filter Categories
+## 🌿 The A Filter Categories
 
 1. **Environment Healing** - Coral restoration, reforestation, wildlife conservation
 2. **Medical Hope** - Clinical trials, FDA approvals, verified health breakthroughs
@@ -71,7 +71,7 @@ The system saves an HTML preview to `preview_email.html` that you can open in yo
 
 - **SourceOrchestrator**: Multi-source news fetching with URL validation
 - **FactualAccuracyGuardian**: Verification and anti-clickbait protection
-- **EmotionalSafetyFilter**: 9-category Amulya filter implementation
+- **EmotionalSafetyFilter**: 9-category A filter implementation
 - **SummaryGenerator**: OpenAI-powered warm summary creation
 - **ContentProcessor**: Complete processing pipeline orchestration
 - **ContentGuarantee**: Emergency fallback stories system
