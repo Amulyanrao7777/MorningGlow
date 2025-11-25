@@ -1346,28 +1346,30 @@ class MorningEmailGuardian:
         today = datetime.now().strftime('%B %d, %Y')
 
         # Build weather HTML block
+               # Build weather HTML block
         weather_html = ""
-       if isinstance(weather_info, dict):
-        temp = weather_info.get("temp_c")
-        humidity = weather_info.get("humidity")
-        aqi_val = weather_info.get("aqi", {}).get("value")
-        aqi_desc = weather_info.get("aqi", {}).get("desc")
-        advice = weather_info.get("advice", "")
 
-  weather_html = f"""
-    <p style="font-family: 'Cormorant Garamond', 'Playfair Display', Georgia, serif; 
-              color:#7d5e67; font-size:16px; line-height:1.7;">
-        Weather report for today: 
-        Temperature is {round(temp)}°C, humidity is {humidity}%, 
-        and AQI is {aqi_desc} ({aqi_val}).
-    </p>
-    <p style="font-family: 'Cormorant Garamond', 'Playfair Display', Georgia, serif; 
-              color:#b89199; font-size:15px;">
-        {advice}
-    </p>
-"""
-else:
-    weather_html = "<p>Weather data not available.</p>"
+        if isinstance(weather_info, dict):
+            temp = weather_info.get("temp_c")
+            humidity = weather_info.get("humidity")
+            aqi_val = weather_info.get("aqi", {}).get("value")
+            aqi_desc = weather_info.get("aqi", {}).get("desc")
+            advice = weather_info.get("advice", "")
+
+            weather_html = f"""
+                <p style="font-family: 'Cormorant Garamond', 'Playfair Display', Georgia, serif; 
+                          color:#7d5e67; font-size:16px; line-height:1.7;">
+                    Weather report for today: 
+                    Temperature is {round(temp)}°C, humidity is {humidity}%, 
+                    and AQI is {aqi_desc} ({aqi_val}).
+                </p>
+                <p style="font-family: 'Cormorant Garamond', 'Playfair Display', Georgia, serif; 
+                          color:#b89199; font-size:15px;">
+                    {advice}
+                </p>
+            """
+        else:
+            weather_html = "<p>Weather data not available.</p>"
 
         # Build stories HTML (keeps previous style)
         stories_html = ""
