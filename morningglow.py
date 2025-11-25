@@ -1218,6 +1218,14 @@ class MorningEmailGuardian:
                                letter-spacing: 2px;">
                         MorningGlow
                     </h1>
+                      <!-- ADDED: author line directly after the main heading -->
+                <p style="color: #dca3b5; 
+                          font-family: 'Georgia', serif; 
+                          font-size: 14px; 
+                          margin: 6px 0 8px 0;
+                          font-style: italic;">
+                    -by Amulya N Rao
+                </p>
                     <p style="color: #b89199; 
                               font-family: 'Georgia', serif; 
                               font-size: 16px; 
@@ -1243,7 +1251,7 @@ class MorningEmailGuardian:
                               line-height: 1.7;
                               margin: 0;
                               font-style: italic;">
-                        "{affirmation}"
+                        {affirmation}
                     </p>
                 </div>
                 
@@ -1255,7 +1263,7 @@ class MorningEmailGuardian:
                               font-family: 'Helvetica Neue', 'Arial', sans-serif; 
                               font-size: 13px; 
                               margin: 0;">
-                        Sent with love by MorningGlow 🌸
+                        Sent with love❤️ with MorningGlow🌸 by Amulya N Rao
                     </p>
                 </div>
             </div>
