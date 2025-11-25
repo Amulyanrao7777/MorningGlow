@@ -1290,7 +1290,7 @@ class MorningEmailGuardian:
             w = w_resp.json()
             temp = w.get('main', {}).get('temp')
             humidity = w.get('main', {}).get('humidity')
-            location_name = w.get('name') or (city or f"{lat:.2f},{lon:.2f}")
+            location_name = city or self.weather_city or "your area"
             logger.debug(f"Weather for {location_name}: temp={temp}, humidity={humidity}")
         except Exception as e:
             logger.debug(f"Error fetching current weather: {e}")
@@ -1347,38 +1347,27 @@ class MorningEmailGuardian:
 
         # Build weather HTML block
         weather_html = ""
-        if isinstance(weather_info, dict):
-            summary_line = weather_info.get("summary", "Weather data not available.")
-            weather_html = f"<p style='color: #7d5e67; font-family: \"Helvetica Neue\", \"Arial\", sans-serif; font-size: 14px; margin: 6px 0 6px 0;'>{summary_line}</p>"
+       if isinstance(weather_info, dict):
+    temp = weather_info.get("temp_c")
+    humidity = weather_info.get("humidity")
+    aqi_val = weather_info.get("aqi", {}).get("value")
+    aqi_desc = weather_info.get("aqi", {}).get("desc")
+    advice = weather_info.get("advice", "")
 
-            aqi = weather_info.get("aqi", {})
-            aqi_val = aqi.get('value')
-            aqi_desc = aqi.get('desc', "Unknown")
-            components = aqi.get('components', {})
-
-            if aqi_val is not None:
-                badge_color = {1: "#4CAF50", 2: "#8BC34A", 3: "#FFC107", 4: "#FF5722", 5: "#B71C1C"}.get(aqi_val, "#9E9E9E")
-                comp_html = ""
-                pm25 = components.get("pm2_5")
-                pm10 = components.get("pm10")
-                if pm25 is not None:
-                    comp_html += f"<div style='font-size:12px; color:#7d5e67'>PM2.5: {pm25} µg/m³</div>"
-                if pm10 is not None:
-                    comp_html += f"<div style='font-size:12px; color:#7d5e67'>PM10: {pm10} µg/m³</div>"
-                advice = weather_info.get("advice", "")
-                weather_html += f"""
-                <div style='display:inline-block; padding:10px 14px; border-radius:12px; background:{badge_color}; color:#fff; font-weight:600; margin-top:6px;'>
-                  AQI: {aqi_desc} ({aqi_val})
-                </div>
-                <div style='display:inline-block; vertical-align:top; margin-left:12px;'>
-                  {comp_html}
-                  <div style='font-size:12px; color:#7d5e67; margin-top:6px;'>{advice}</div>
-                </div>
-                """
-            else:
-                weather_html += "<div style='font-size:12px; color:#7d5e67; margin-top:6px;'>AQI: Unknown</div>"
-        else:
-            weather_html = f"<p style='color: #7d5e67; font-family: \"Helvetica Neue\", \"Arial\", sans-serif; font-size: 14px; margin: 6px 0 6px 0;'>{weather_info}</p>"
+  weather_html = f"""
+    <p style="font-family: 'Cormorant Garamond', 'Playfair Display', Georgia, serif; 
+              color:#7d5e67; font-size:16px; line-height:1.7;">
+        Weather report for today: 
+        Temperature is {round(temp)}°C, humidity is {humidity}%, 
+        and AQI is {aqi_desc} ({aqi_val}).
+    </p>
+    <p style="font-family: 'Cormorant Garamond', 'Playfair Display', Georgia, serif; 
+              color:#b89199; font-size:15px;">
+        {advice}
+    </p>
+"""
+else:
+    weather_html = "<p>Weather data not available.</p>"
 
         # Build stories HTML (keeps previous style)
         stories_html = ""
@@ -1486,13 +1475,14 @@ class MorningEmailGuardian:
         """
         results = {}
         subject = f"🌸 Your MorningGlow - {datetime.now().strftime('%B %d, %Y')}"
-
+        if owner_email:
+            owner_email = owner_email.strip().lower()
         for recipient in recipients:
             recipient = recipient.strip()
             if not recipient:
                 continue
             greeting = "Good Morning Gorgeous"
-            if owner_email and recipient.lower() == owner_email.lower():
+            if owner_email and recipient.strip().lower() == owner_email:
                 greeting = "Good Morning Goddess"
 
             override = (recipient_locations or {}).get(recipient, {}) or {}
