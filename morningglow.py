@@ -1348,11 +1348,11 @@ class MorningEmailGuardian:
         # Build weather HTML block
         weather_html = ""
        if isinstance(weather_info, dict):
-    temp = weather_info.get("temp_c")
-    humidity = weather_info.get("humidity")
-    aqi_val = weather_info.get("aqi", {}).get("value")
-    aqi_desc = weather_info.get("aqi", {}).get("desc")
-    advice = weather_info.get("advice", "")
+        temp = weather_info.get("temp_c")
+        humidity = weather_info.get("humidity")
+        aqi_val = weather_info.get("aqi", {}).get("value")
+        aqi_desc = weather_info.get("aqi", {}).get("desc")
+        advice = weather_info.get("advice", "")
 
   weather_html = f"""
     <p style="font-family: 'Cormorant Garamond', 'Playfair Display', Georgia, serif; 
