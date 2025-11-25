@@ -21,43 +21,6 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
-      - name: Sanity check: required secrets present (fail fast)
-        env:
-          OPENWEATHER_API_KEY: ${{ secrets.OPENWEATHER_API_KEY }}
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          SMTP_USERNAME: ${{ secrets.SMTP_USERNAME }}
-          SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
-          FROM_EMAIL: ${{ secrets.FROM_EMAIL }}
-          RECIPIENT_EMAIL: ${{ secrets.RECIPIENT_EMAIL }}
-          RECIPIENT_EMAILS: ${{ secrets.RECIPIENT_EMAILS }}
-          OWNER_EMAIL: ${{ secrets.OWNER_EMAIL }}
-        run: |
-          python - <<'PY'
-import os, sys, json
-# list here the secrets your run.py absolutely requires to operate
-required = [
-  "OPENWEATHER_API_KEY",
-  "OPENAI_API_KEY",
-  "SMTP_USERNAME",
-  "SMTP_PASSWORD",
-  # at least one of RECIPIENT_EMAIL or RECIPIENT_EMAILS should be present:
-]
-missing = [k for k in required if not os.getenv(k)]
-recipients = bool(os.getenv("RECIPIENT_EMAIL")) or bool(os.getenv("RECIPIENT_EMAILS"))
-if missing or not recipients:
-    print("Sanity check FAILED.")
-    if missing:
-        print("Missing required secrets (by name):", missing)
-    if not recipients:
-        print("Missing recipient info: set RECIPIENT_EMAIL or RECIPIENT_EMAILS secret.")
-    print("Please add the missing secrets in: Settings → Secrets and variables → Actions")
-    # Exit non-zero so the job fails visibly and you can fix secrets
-    sys.exit(1)
-print("Sanity check passed: required secrets appear to be set (presence-only).")
-# helpful hint about debug logs:
-print("Tip: to enable step debug logs, create a repository secret named ACTIONS_STEP_DEBUG with value 'true' (then re-run the workflow).")
-PY
-
       - name: Run MorningGlow
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
