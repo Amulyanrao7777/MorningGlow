@@ -1263,7 +1263,8 @@ class MorningEmailGuardian:
                               font-family: 'Helvetica Neue', 'Arial', sans-serif; 
                               font-size: 13px; 
                               margin: 0;">
-                        Sent with love❤️ with MorningGlow🌸 by Amulya N Rao
+                        Love & Light🤍
+                        Sent with MorningGlow🌸 by Amulya N Rao
                     </p>
                 </div>
             </div>
