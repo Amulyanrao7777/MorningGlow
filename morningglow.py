@@ -1155,11 +1155,24 @@ class ContentGuarantee:
 
 class MorningEmailGuardian:
     """
-    Creates beautiful HTML emails with soft pink/rose aesthetic.
-    Gentle typography, warm styling, affirmation box.
-    Adds personalized greeting and live weather + AQI intro.
+    Weather + AQI aware email generator.
+
+    fetch_weather_and_aqi(...) returns a structured dict:
+      {
+        "location": "San Francisco",
+        "temp_c": 10.3,
+        "humidity": 86,
+        "summary": "Weather in San Francisco: 10°C, Humidity: 86%, AQI: Good (1).",
+        "aqi": {
+           "value": 1,                 # OpenWeatherMap index 1..5
+           "desc": "Good",
+           "components": { "pm2_5": 3.1, "pm10": 5.0, ... }
+        },
+        "advice": "Air quality is good..."
+      }
+    If weather cannot be fetched returns {"summary": "Weather data not available."}
     """
-    
+
     def __init__(self):
         self.smtp_server = os.getenv('SMTP_SERVER', 'smtp.gmail.com')
         self.smtp_port = int(os.getenv('SMTP_PORT', '587'))
@@ -1168,102 +1181,200 @@ class MorningEmailGuardian:
         self.from_email = os.getenv('FROM_EMAIL', self.smtp_username)
         # Weather config
         self.openweather_key = os.getenv('OPENWEATHER_API_KEY')
-        self.weather_city = os.getenv('WEATHER_CITY')  # optional
+        self.weather_city = os.getenv('WEATHER_CITY')
         self.weather_lat = os.getenv('WEATHER_LAT')
         self.weather_lon = os.getenv('WEATHER_LON')
-    
+        # Optional device coords
+        self.device_lat = os.getenv('DEVICE_LAT')
+        self.device_lon = os.getenv('DEVICE_LON')
+
     def _geocode_city(self, city: str) -> Optional[Tuple[float, float]]:
-        """Use OpenWeatherMap geocoding to get lat/lon for a city name."""
         if not self.openweather_key or not city:
+            logger.debug("Geocode skipped: missing api key or city")
             return None
-        try:
-            url = "http://api.openweathermap.org/geo/1.0/direct"
-            resp = requests.get(url, params={'q': city, 'limit': 1, 'appid': self.openweather_key}, timeout=6)
-            resp.raise_for_status()
-            data = resp.json()
-            if data and isinstance(data, list):
-                return data[0]['lat'], data[0]['lon']
-        except Exception as e:
-            logger.debug(f"Geocoding failed: {e}")
+        url = "https://api.openweathermap.org/geo/1.0/direct"
+        candidates = [city.strip()]
+        city_lower = city.lower()
+        # helpful fallbacks for Bengaluru/Bangalore
+        if 'bangalore' in city_lower or 'bengaluru' in city_lower:
+            candidates += [f"{city}, IN", "Bengaluru, IN", "Bangalore, IN"]
+        else:
+            candidates += [f"{city}, IN", f"{city}, India"]
+        for c in candidates:
+            try:
+                resp = requests.get(url, params={'q': c, 'limit': 1, 'appid': self.openweather_key}, timeout=6)
+                resp.raise_for_status()
+                data = resp.json()
+                if data and isinstance(data, list) and len(data) > 0:
+                    lat = data[0].get('lat')
+                    lon = data[0].get('lon')
+                    logger.debug(f"Geocode '{c}' -> lat={lat}, lon={lon}")
+                    if lat is not None and lon is not None:
+                        return float(lat), float(lon)
+                else:
+                    logger.debug(f"Geocode returned empty for '{c}'")
+            except Exception as e:
+                logger.debug(f"Geocoding attempt for '{c}' failed: {e}")
         return None
-    
-    def fetch_weather_and_aqi(self) -> str:
+
+    def _resolve_coords(self, lat: Optional[float], lon: Optional[float], city: Optional[str]) -> Optional[Tuple[float, float]]:
+        # 1) explicit args
+        if lat is not None and lon is not None:
+            try:
+                return float(lat), float(lon)
+            except Exception:
+                logger.debug("Invalid explicit lat/lon passed; falling through")
+        # 2) device env
+        if self.device_lat and self.device_lon:
+            try:
+                return float(self.device_lat), float(self.device_lon)
+            except Exception as e:
+                logger.debug(f"DEVICE_LAT/DEVICE_LON parse error: {e}")
+        # 3) explicit weather env
+        if self.weather_lat and self.weather_lon:
+            try:
+                return float(self.weather_lat), float(self.weather_lon)
+            except Exception as e:
+                logger.debug(f"WEATHER_LAT/WEATHER_LON parse error: {e}")
+        # 4) geocode
+        target_city = (city or self.weather_city or "").strip()
+        if target_city:
+            coords = self._geocode_city(target_city)
+            if coords:
+                return coords
+            else:
+                logger.debug(f"Geocoding failed for city '{target_city}'")
+        return None
+
+    def _owm_aqi_desc(self, value: Optional[int]) -> str:
+        aqi_map = {1: "Good", 2: "Fair", 3: "Moderate", 4: "Poor", 5: "Very Poor"}
+        return aqi_map.get(value, "Unknown")
+
+    def _aqi_health_advice(self, value: Optional[int]) -> str:
+        if value is None:
+            return ""
+        adv = {
+            1: "Air quality is good. No special precautions.",
+            2: "Air quality is fair. Sensitive people may consider light precautions.",
+            3: "Air quality is moderate. Consider limiting prolonged outdoor exertion.",
+            4: "Air quality is poor. Sensitive groups should avoid heavy outdoor exertion.",
+            5: "Air quality is very poor. Avoid outdoor activity; consider masks/filters."
+        }
+        return adv.get(value, "")
+
+    def fetch_weather_and_aqi(self, lat: Optional[float] = None, lon: Optional[float] = None, city: Optional[str] = None) -> Dict:
         """
-        Fetch current temperature, humidity and AQI.
-        Requires OPENWEATHER_API_KEY in env. Location via WEATHER_LAT & WEATHER_LON
-        or WEATHER_CITY.
-        Returns a short human-friendly summary string.
+        Returns structured weather + AQI dict, or {"summary": "Weather data not available."}
         """
         if not self.openweather_key:
             logger.warning("OPENWEATHER_API_KEY not configured. Skipping weather.")
-            return "Weather data not available."
-        
-        lat = None
-        lon = None
-        # priority: explicit lat/lon env, else city geocode
-        if self.weather_lat and self.weather_lon:
-            try:
-                lat = float(self.weather_lat)
-                lon = float(self.weather_lon)
-            except Exception:
-                lat = lon = None
-        
-        if (lat is None or lon is None) and self.weather_city:
-            coords = self._geocode_city(self.weather_city)
-            if coords:
-                lat, lon = coords
-        
-        if lat is None or lon is None:
-            logger.warning("Weather coordinates not available. Skipping weather.")
-            return "Weather data not available."
-        
+            return {"summary": "Weather data not available."}
+
+        resolved = self._resolve_coords(lat, lon, city)
+        if not resolved:
+            logger.info("Weather coordinates not available (after resolution). Skipping weather.")
+            return {"summary": "Weather data not available."}
+        lat, lon = resolved
+
+        # Fetch current weather
         try:
-            # Current weather
             weather_url = "https://api.openweathermap.org/data/2.5/weather"
             w_resp = requests.get(weather_url, params={'lat': lat, 'lon': lon, 'appid': self.openweather_key, 'units': 'metric'}, timeout=6)
             w_resp.raise_for_status()
             w = w_resp.json()
             temp = w.get('main', {}).get('temp')
             humidity = w.get('main', {}).get('humidity')
-            name = w.get('name') or self.weather_city or f"{lat:.2f},{lon:.2f}"
-            
-            # AQI
-            aqi_url = "http://api.openweathermap.org/data/2.5/air_pollution"
+            location_name = w.get('name') or (city or f"{lat:.2f},{lon:.2f}")
+            logger.debug(f"Weather for {location_name}: temp={temp}, humidity={humidity}")
+        except Exception as e:
+            logger.debug(f"Error fetching current weather: {e}")
+            return {"summary": "Weather data not available."}
+
+        # Fetch AQI (optional)
+        aqi_value = None
+        components = None
+        try:
+            aqi_url = "https://api.openweathermap.org/data/2.5/air_pollution"
             a_resp = requests.get(aqi_url, params={'lat': lat, 'lon': lon, 'appid': self.openweather_key}, timeout=6)
             a_resp.raise_for_status()
             a = a_resp.json()
-            aqi_value = None
             if a and 'list' in a and len(a['list']) > 0:
-                aqi_value = a['list'][0].get('main', {}).get('aqi')
-            
-            # Map AQI value (OpenWeatherMap: 1..5) to description
-            aqi_map = {
-                1: "Good",
-                2: "Fair",
-                3: "Moderate",
-                4: "Poor",
-                5: "Very Poor"
-            }
-            aqi_desc = aqi_map.get(aqi_value, "Unknown") if aqi_value is not None else "Unknown"
-            
-            parts = []
-            if temp is not None:
-                parts.append(f"{round(temp)}°C")
-            if humidity is not None:
-                parts.append(f"Humidity: {humidity}%")
-            parts.append(f"AQI: {aqi_desc}" + (f" ({aqi_value})" if aqi_value is not None else ""))
-            
-            location_display = name
-            summary = f"Weather in {location_display}: " + ", ".join(parts) + "."
-            return summary
+                main = a['list'][0].get('main', {})
+                aqi_value = main.get('aqi')  # 1..5
+                components = a['list'][0].get('components', {})  # pm2_5, pm10, no2, so2 etc
+                logger.debug(f"AQI for {location_name}: {aqi_value}, components: {components}")
         except Exception as e:
-            logger.debug(f"Error fetching weather/AQI: {e}")
-            return "Weather data not available."
-    
-    def generate_html_email(self, stories: List[Dict], affirmation: str, greeting: str, weather_summary: str) -> str:
-        """Generate beautiful HTML email with personalized greeting and weather intro."""
+            logger.debug(f"AQI fetch non-fatal error: {e}")
+            aqi_value = None
+            components = None
+
+        aqi_desc = self._owm_aqi_desc(aqi_value)
+        parts = []
+        if temp is not None:
+            parts.append(f"{round(temp)}°C")
+        if humidity is not None:
+            parts.append(f"Humidity: {humidity}%")
+        parts.append(f"AQI: {aqi_desc}" + (f" ({aqi_value})" if aqi_value is not None else ""))
+
+        summary = f"Weather in {location_name}: " + ", ".join(parts) + "."
+
+        result = {
+            "location": location_name,
+            "temp_c": temp,
+            "humidity": humidity,
+            "summary": summary,
+            "aqi": {
+                "value": aqi_value,
+                "desc": aqi_desc,
+                "components": components or {}
+            },
+            "advice": self._aqi_health_advice(aqi_value)
+        }
+        return result
+
+    def generate_html_email(self, stories: List[Dict], affirmation: str, greeting: str, weather_info) -> str:
+        """
+        Accepts weather_info as either a string (old behavior) or a dict (as returned above).
+        Renders AQI badge + components + advice when dict is provided.
+        """
         today = datetime.now().strftime('%B %d, %Y')
-        
+
+        # Build weather HTML block
+        weather_html = ""
+        if isinstance(weather_info, dict):
+            summary_line = weather_info.get("summary", "Weather data not available.")
+            weather_html = f"<p style='color: #7d5e67; font-family: \"Helvetica Neue\", \"Arial\", sans-serif; font-size: 14px; margin: 6px 0 6px 0;'>{summary_line}</p>"
+
+            aqi = weather_info.get("aqi", {})
+            aqi_val = aqi.get('value')
+            aqi_desc = aqi.get('desc', "Unknown")
+            components = aqi.get('components', {})
+
+            if aqi_val is not None:
+                badge_color = {1: "#4CAF50", 2: "#8BC34A", 3: "#FFC107", 4: "#FF5722", 5: "#B71C1C"}.get(aqi_val, "#9E9E9E")
+                comp_html = ""
+                pm25 = components.get("pm2_5")
+                pm10 = components.get("pm10")
+                if pm25 is not None:
+                    comp_html += f"<div style='font-size:12px; color:#7d5e67'>PM2.5: {pm25} µg/m³</div>"
+                if pm10 is not None:
+                    comp_html += f"<div style='font-size:12px; color:#7d5e67'>PM10: {pm10} µg/m³</div>"
+                advice = weather_info.get("advice", "")
+                weather_html += f"""
+                <div style='display:inline-block; padding:10px 14px; border-radius:12px; background:{badge_color}; color:#fff; font-weight:600; margin-top:6px;'>
+                  AQI: {aqi_desc} ({aqi_val})
+                </div>
+                <div style='display:inline-block; vertical-align:top; margin-left:12px;'>
+                  {comp_html}
+                  <div style='font-size:12px; color:#7d5e67; margin-top:6px;'>{advice}</div>
+                </div>
+                """
+            else:
+                weather_html += "<div style='font-size:12px; color:#7d5e67; margin-top:6px;'>AQI: Unknown</div>"
+        else:
+            weather_html = f"<p style='color: #7d5e67; font-family: \"Helvetica Neue\", \"Arial\", sans-serif; font-size: 14px; margin: 6px 0 6px 0;'>{weather_info}</p>"
+
+        # Build stories HTML (keeps previous style)
         stories_html = ""
         for i, story in enumerate(stories, 1):
             published_date = story.get('published_at', 'Date not available')
@@ -1274,153 +1385,69 @@ class MorningEmailGuardian:
                     published_date = parsed_date.strftime('%B %d, %Y at %I:%M %p')
                 except:
                     pass
-            
             stories_html += f"""
             <div style="background: linear-gradient(135deg, #fff5f7 0%, #ffe9f0 100%); 
                         border-radius: 16px; 
                         padding: 28px; 
                         margin-bottom: 24px;
                         box-shadow: 0 4px 12px rgba(251, 207, 232, 0.15);">
-                <h2 style="color: #d4738c; 
-                           font-family: 'Georgia', serif; 
-                           font-size: 18px; 
-                           margin: 0 0 12px 0;
-                           line-height: 1.3;
-                           font-weight: 600;">
+                <h2 style="color: #d4738c; font-family: 'Georgia', serif; font-size: 18px; margin: 0 0 12px 0; line-height: 1.3; font-weight: 600;">
                     {story.get('title', 'Untitled')}
                 </h2>
-                <p style="color: #b89199; 
-                          font-family: 'Helvetica Neue', 'Arial', sans-serif; 
-                          font-size: 11px; 
-                          margin: 0 0 10px 0;
-                          font-style: italic;">
+                <p style="color: #b89199; font-family: 'Helvetica Neue', 'Arial', sans-serif; font-size: 11px; margin: 0 0 10px 0; font-style: italic;">
                     Published: {published_date}
                 </p>
-                <p style="color: #7d5e67; 
-                          font-family: 'Helvetica Neue', 'Arial', sans-serif; 
-                          font-size: 14px; 
-                          line-height: 1.6;
-                          margin: 0 0 14px 0;
-                          text-align: justify;">
+                <p style="color: #7d5e67; font-family: 'Helvetica Neue', 'Arial', sans-serif; font-size: 14px; line-height: 1.6; margin: 0 0 14px 0; text-align: justify;">
                     {story.get('summary', '')}
                 </p>
-                <a href="{story.get('url', '#')}" 
-                   style="color: #e08fa3; 
-                          text-decoration: none; 
-                          font-family: 'Helvetica Neue', 'Arial', sans-serif;
-                          font-size: 12px;
-                          font-weight: 500;
-                          transition: color 0.3s;">
+                <a href="{story.get('url', '#')}" style="color: #e08fa3; text-decoration: none; font-family: 'Helvetica Neue', 'Arial', sans-serif; font-size: 12px; font-weight: 500;">
                     Read full article →
                 </a>
             </div>
             """
-        
-        # Intro block: greeting, weather, gratitude, transition
+
         intro_html = f"""
         <div style="margin-bottom: 18px; text-align: center;">
             <h3 style="color: #d4738c; font-family: 'Georgia', serif; font-size: 20px; margin: 0 0 8px 0; font-weight: 400; text-align: center;">{greeting}</h3>
-            <p style="color: #7d5e67; font-family: 'Helvetica Neue', 'Arial', sans-serif; font-size: 14px; margin: 6px 0 6px 0;">
-                {weather_summary}
-            </p>
+            {weather_html}
             <p style="color: #7d5e67; font-family: 'Georgia', sans-serif; font-size: 13px; margin: 6px 0 6px 0;">
                 We are incredibly grateful for another chance to rise now aren't we?. You are awesome! <br>
                       Here is your curated positive morning news:
             </p>
         </div>
         """
-        
+
         html = f"""
         <!DOCTYPE html>
         <html>
-        <head>
-            <meta charset="UTF-8">
-            <meta name="viewport" content="width=device-width, initial-scale=1.0">
-            <title>MorningGlow - {today}</title>
-        </head>
-        <body style="margin: 0; 
-                     padding: 0; 
-                     background: linear-gradient(to bottom, #fff9fb, #ffeff5);
-                     font-family: 'Helvetica Neue', 'Arial', sans-serif;">
-            <div style="max-width: 680px; 
-                        margin: 0 auto; 
-                        padding: 40px 20px;">
-                
-                <div style="text-align: center; margin-bottom: 24px;">
-                    <h1 style="color: #d4738c; 
-                               font-family: 'Georgia', serif; 
-                               font-size: 30px; 
-                               margin: 0 0 8px 0;
-                               font-weight: 300;
-                               letter-spacing: 2px;">
-                        MorningGlow
-                    </h1>
-                      <!-- ADDED: author line directly after the main heading -->
-                <p style="color: #dca3b5; 
-                          font-family: 'Georgia', serif; 
-                          font-size: 14px; 
-                          margin: 6px 0 8px 0;
-                          font-style: italic;">
-                    -by Amulya N Rao
-                </p>
-                    <p style="color: #b89199; 
-                              font-family: 'Georgia', serif; 
-                              font-size: 16px; 
-                              margin: 0;
-                              font-style: italic;">
-                        {today}
-                    </p>
-                </div>
-                
-                {intro_html}
-                
-                <div style="margin-bottom: 24px;">
-                    {stories_html}
-                </div>
-                
-                <div style="background: linear-gradient(135deg, #ffd9e8 0%, #ffb3d1 100%);
-                            border-radius: 16px;
-                            padding: 32px;
-                            text-align: center;
-                            border: 2px solid #ffc4dd;
-                            box-shadow: 0 6px 20px rgba(251, 207, 232, 0.25);">
-                    <p style="color: #000000;
-                              font-family: 'Georgia', serif;
-                              font-size: 18px;
-                              line-height: 1.7;
-                              margin: 0;
-                              font-style: italic;">
-                        {affirmation}
-                    </p>
-                </div>
-                
-                <div style="text-align: center; 
-                            margin-top: 28px; 
-                            padding-top: 24px;
-                            border-top: 1px solid #f8d7e3;">
-                    <p style="color: #c9a1ad; 
-                              font-family: 'Helvetica Neue', 'Arial', sans-serif; 
-                              font-size: 13px; 
-                              margin: 0;">
-                           Love & Light🤍 <br>
-                        Sent with MorningGlow🌸 <br>
-                           by Amulya N Rao
-                    </p>
-                </div>
+        <head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>MorningGlow - {today}</title></head>
+        <body style="margin:0;padding:0;background:linear-gradient(to bottom,#fff9fb,#ffeff5);font-family:'Helvetica Neue',Arial,sans-serif;">
+          <div style="max-width:680px;margin:0 auto;padding:40px 20px;">
+            <div style="text-align:center;margin-bottom:24px;">
+              <h1 style="color:#d4738c;font-family:'Georgia',serif;font-size:30px;margin:0 0 8px 0;font-weight:300;letter-spacing:2px;">MorningGlow</h1>
+              <p style="color:#dca3b5;font-family:'Georgia',serif;font-size:14px;margin:6px 0 8px 0;font-style:italic;">-by Amulya N Rao</p>
+              <p style="color:#b89199;font-family:'Georgia',serif;font-size:16px;margin:0;font-style:italic;">{today}</p>
             </div>
+            {intro_html}
+            <div style="margin-bottom:24px;">{stories_html}</div>
+            <div style="background: linear-gradient(135deg, #ffd9e8 0%, #ffb3d1 100%); border-radius:16px; padding:32px; text-align:center; border:2px solid #ffc4dd; box-shadow:0 6px 20px rgba(251,207,232,0.25);">
+              <p style="color:#000000;font-family:'Georgia',serif;font-size:18px;line-height:1.7;margin:0;font-style:italic;">{affirmation}</p>
+            </div>
+            <div style="text-align:center;margin-top:28px;padding-top:24px;border-top:1px solid #f8d7e3;">
+              <p style="color:#c9a1ad;font-family:'Helvetica Neue',Arial,sans-serif;font-size:13px;margin:0;">Love & Light🤍 <br> Sent with MorningGlow🌸 <br> by Amulya N Rao</p>
+            </div>
+          </div>
         </body>
         </html>
         """
-        
         return html
-    
+
     def send_email(self, to_email: str, subject: str, html_content: str) -> bool:
-        """Send the beautiful email."""
+        """Send the beautiful email (unchanged behavior)."""
         if not self.smtp_username or not self.smtp_password:
             logger.warning("SMTP credentials not configured. Email not sent.")
             logger.info("Email HTML content would be (preview truncated):")
             logger.info(html_content[:500] + "...")
-            # Still write preview for manual inspection
             try:
                 safe_name = to_email.replace('@', '_at_').replace('.', '_')
                 with open(f'preview_email_{safe_name}.html', 'w', encoding='utf-8') as f:
@@ -1429,57 +1456,51 @@ class MorningEmailGuardian:
             except Exception:
                 pass
             return False
-        
         try:
             msg = MIMEMultipart('alternative')
             msg['From'] = self.from_email
             msg['To'] = to_email
             msg['Subject'] = subject
-            
             html_part = MIMEText(html_content, 'html', 'utf-8')
             msg.attach(html_part)
-            
             with smtplib.SMTP(self.smtp_server, self.smtp_port) as server:
                 server.starttls()
                 server.login(self.smtp_username, self.smtp_password)
                 server.send_message(msg)
-            
             logger.info(f"Email sent successfully to {to_email}")
             return True
-            
         except Exception as e:
             logger.error(f"Error sending email to {to_email}: {str(e)}")
             return False
-    
-    def deliver_morning_glow(self, recipients: List[str], stories: List[Dict], affirmation: str, owner_email: str = None) -> Dict[str, bool]:
+
+    def deliver_morning_glow(self, recipients: List[str], stories: List[Dict], affirmation: str,
+                             owner_email: str = None, recipient_locations: Optional[Dict[str, Dict]] = None) -> Dict[str, bool]:
         """
-        Send personalized MorningGlow emails to a list of recipients.
-        Greeting logic:
-          - If recipient == owner_email -> "Good Morning Goddess"
-          - Else -> "Good Morning Gorgeous"
-        Each email includes live weather/AQI and the gratitude/intro line.
-        Returns dict mapping recipient -> success boolean.
+        Per-recipient weather/AQI: pass recipient_locations mapping (email -> {lat, lon} or {city: "..."}).
         """
         results = {}
-        weather_summary = self.fetch_weather_and_aqi()
-        today = datetime.now().strftime('%B %d, %Y')
-        subject = f"🌸 Your MorningGlow - {today}"
-        
+        subject = f"🌸 Your MorningGlow - {datetime.now().strftime('%B %d, %Y')}"
+
         for recipient in recipients:
             recipient = recipient.strip()
             if not recipient:
                 continue
+            greeting = "Good Morning Gorgeous"
             if owner_email and recipient.lower() == owner_email.lower():
                 greeting = "Good Morning Goddess"
-            else:
-                greeting = "Good Morning Gorgeous"
-            
-            html_content = self.generate_html_email(stories, affirmation, greeting, weather_summary)
+
+            override = (recipient_locations or {}).get(recipient, {}) or {}
+            lat = override.get('lat')
+            lon = override.get('lon')
+            city = override.get('city')
+
+            # Get structured weather+AQI
+            weather_info = self.fetch_weather_and_aqi(lat=lat, lon=lon, city=city)
+            html_content = self.generate_html_email(stories, affirmation, greeting, weather_info)
             success = self.send_email(recipient, subject, html_content)
             results[recipient] = success
-        
-        return results
 
+        return results
 
 class SilentGuardian:
     """
