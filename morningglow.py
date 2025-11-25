@@ -134,7 +134,13 @@ class SourceOrchestrator:
         all_articles = []
         
         for query in queries:
-            all_articles.extend(self.fetch_newsapi_articles(query))
+            try:
+                articles = self.fetch_newsapi_articles(query)
+                if articles:
+                    all_articles.extend(articles)
+            except Exception as e:
+                logger.error(f"NewsAPI failed for query '{query}', continuing pipeline: {e}")
+
             all_articles.extend(self.fetch_google_news_rss(query))
         
         validated_articles = []
