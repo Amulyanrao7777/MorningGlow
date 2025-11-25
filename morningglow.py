@@ -1319,12 +1319,13 @@ class MorningEmailGuardian:
         # Intro block: greeting, weather, gratitude, transition
         intro_html = f"""
         <div style="margin-bottom: 18px; text-align: left;">
-            <h2 style="color: #d4738c; font-family: 'Georgia', serif; font-size: 22px; margin: 0 0 8px 0; font-weight: 400;">{greeting}</h2>
+            <h2 style="color: #d4738c; font-family: 'Georgia', serif; font-size: 20px; margin: 0 0 8px 0; font-weight: 400; text-align: center;">{greeting}</h2>
             <p style="color: #7d5e67; font-family: 'Helvetica Neue', 'Arial', sans-serif; font-size: 14px; margin: 6px 0 6px 0;">
                 {weather_summary}
             </p>
             <p style="color: #7d5e67; font-family: 'Helvetica Neue', 'Arial', sans-serif; font-size: 14px; margin: 6px 0 6px 0;">
-                We are incredibly grateful for another chance to rise. Here is your curated positive morning news:
+                We are incredibly grateful for another chance to rise now aren't we?. You are awesome!
+                      Here is your curated positive morning news:
             </p>
         </div>
         """
