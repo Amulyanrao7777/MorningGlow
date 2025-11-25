@@ -1483,9 +1483,9 @@ class MorningEmailGuardian:
             recipient = recipient.strip()
             if not recipient:
                 continue
-            greeting = "Good Morning Gorgeous"
+            greeting = "Good Morning Gorgeous!"
             if owner_email and recipient.strip().lower() == owner_email:
-                greeting = "Good Morning Goddess"
+                greeting = "Good Morning Goddess!"
 
             override = (recipient_locations or {}).get(recipient, {}) or {}
             lat = override.get('lat')
