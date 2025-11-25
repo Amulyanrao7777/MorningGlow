@@ -448,59 +448,88 @@ Write the summary now:"""
             return self._generate_fallback_summary(article)
     
     def _generate_fallback_summary(self, article: Dict) -> str:
-        """Generate summary from actual article facts (6-7 sentences, 150-170 words) when OpenAI is unavailable."""
-        title = article.get('title', '')
-        description = article.get('description', '')
-        content = article.get('content', '') or description
-        
+        """
+        Content-only fallback summary for when OpenAI is unavailable.
+        - Uses only sentences present in article content/description (no invented or tonal lines).
+        - Prefers up to 7 real sentences; will return fewer if the article lacks enough sentence content.
+        - Cleans HTML/URLs and enforces punctuation and a soft 170-word maximum.
+        """
+        title = (article.get('title') or '').strip()
+        description = (article.get('description') or '').strip()
+        content = (article.get('content') or description or '').strip()
+
+        # If nothing to work with, return title or a very short neutral fallback
+        if not content:
+            return title or "A brief update for your morning."
+
+        # Clean HTML and links
         text = re.sub(r'<[^>]+>', '', content)
         text = re.sub(r'\s+', ' ', text).strip()
-        text = re.sub(r'http[s]?://\S+', '', text)
-        
-        sentences = [s.strip() for s in text.split('.') if s.strip() and len(s.strip()) > 20]
-        
-        if len(sentences) < 1:
-            sentences = [description] if description else ["A positive development bringing hope and change."]
-        
-        import random
-        selected_sentences = sentences[:6] if len(sentences) >= 6 else sentences
-        
-        summary_parts = []
-        summary_parts.append(selected_sentences[0] if selected_sentences else title)
-        
-        for sent in selected_sentences[1:]:
-            current = ' '.join(summary_parts)
-            if len(current.split()) + len(sent.split()) <= 170:
-                summary_parts.append(sent)
-            else:
-                break
-        
-        full_summary = '. '.join(summary_parts)
-        if not full_summary.endswith('.'):
-            full_summary += '.'
-        
-        word_count = len(full_summary.split())
-        if word_count < 80:
-            full_summary += f" This development brings positive change and renewed hope to many."
-        
-        return full_summary
-        
-        for i, sentence in enumerate(template_sentences):
-            selected_sentences.append(sentence)
-            total_words += len(sentence.split())
-            
-            if len(selected_sentences) >= 6 and total_words >= 150:
-                break
-            
-            if len(selected_sentences) >= 7 and total_words >= 140:
-                break
-        
-        if len(selected_sentences) < 6:
-            while len(selected_sentences) < 6 and len(selected_sentences) < len(template_sentences):
-                selected_sentences.append(template_sentences[len(selected_sentences)])
-        
-        summary = ' '.join(selected_sentences[:7])
-        
+        text = re.sub(r'http[s]?://\S+', '', text).strip()
+
+        # Split into sentences (basic rule: split after . ? ! followed by space)
+        raw_sentences = re.split(r'(?<=[\.\?\!])\s+', text)
+
+        # Keep only reasonably long sentences, remove trailing punctuation, trim
+        sentences = []
+        for s in raw_sentences:
+            s_clean = s.strip()
+            # ignore very short fragments
+            if len(s_clean) < 20:
+                continue
+            # drop trailing punctuation for normalized comparison
+            s_clean = s_clean.rstrip('.!?').strip()
+            if not s_clean:
+                continue
+            sentences.append(s_clean)
+
+        # If nothing after sentence-splitting, try newline-based parts as a fallback
+        if not sentences:
+            parts = [p.strip() for p in re.split(r'[\r\n]+', text) if len(p.strip()) >= 20]
+            sentences = [p.rstrip('.!?') for p in parts]
+
+        # Avoid sentences that just repeat the title verbatim
+        lower_title = title.lower()
+        if lower_title:
+            sentences = [s for s in sentences if lower_title not in s.lower()]
+
+        # Deduplicate very similar entries (simple exact-match dedupe)
+        seen = set()
+        deduped = []
+        for s in sentences:
+            key = s.lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            deduped.append(s)
+        sentences = deduped
+
+        # Select up to 7 sentences (prefer earlier sentences)
+        selected = sentences[:7]
+
+        # Ensure punctuation at the end of each sentence and capitalization
+        def format_sent(s: str) -> str:
+            s = s.strip()
+            if not s:
+                return ''
+            s = s[0].upper() + s[1:]
+            if not s.endswith('.'):
+                s += '.'
+            return s
+
+        selected = [format_sent(s) for s in selected if s.strip()]
+
+        summary = ' '.join(selected).strip()
+        if not summary:
+            return title or "A brief update for your morning."
+
+        # Soft truncate to 170 words (trim at word boundary, preserve punctuation)
+        words = summary.split()
+        if len(words) > 170:
+            summary = ' '.join(words[:170]).rstrip()
+            if not summary.endswith('.'):
+                summary += '.'
+
         return summary
     
     def generate_summaries_batch(self, articles: List[Dict]) -> List[Dict]:
@@ -631,7 +660,7 @@ class ContentGuarantee:
     ]
     
     AFFIRMATIONS = [
-        "I am the woman who rises every time life tests me",
+         "I am the woman who rises every time life tests me",
 "I am built for expansion, evolution, and elevation",
 "I am choosing myself with a conviction that cannot be shaken",
 "I am becoming more powerful every time something challenges me",
@@ -1128,6 +1157,7 @@ class MorningEmailGuardian:
     """
     Creates beautiful HTML emails with soft pink/rose aesthetic.
     Gentle typography, warm styling, affirmation box.
+    Adds personalized greeting and live weather + AQI intro.
     """
     
     def __init__(self):
@@ -1136,9 +1166,102 @@ class MorningEmailGuardian:
         self.smtp_username = os.getenv('SMTP_USERNAME')
         self.smtp_password = os.getenv('SMTP_PASSWORD')
         self.from_email = os.getenv('FROM_EMAIL', self.smtp_username)
+        # Weather config
+        self.openweather_key = os.getenv('OPENWEATHER_API_KEY')
+        self.weather_city = os.getenv('WEATHER_CITY')  # optional
+        self.weather_lat = os.getenv('WEATHER_LAT')
+        self.weather_lon = os.getenv('WEATHER_LON')
     
-    def generate_html_email(self, stories: List[Dict], affirmation: str) -> str:
-        """Generate beautiful HTML email with soft pink/rose aesthetic."""
+    def _geocode_city(self, city: str) -> Optional[Tuple[float, float]]:
+        """Use OpenWeatherMap geocoding to get lat/lon for a city name."""
+        if not self.openweather_key or not city:
+            return None
+        try:
+            url = "http://api.openweathermap.org/geo/1.0/direct"
+            resp = requests.get(url, params={'q': city, 'limit': 1, 'appid': self.openweather_key}, timeout=6)
+            resp.raise_for_status()
+            data = resp.json()
+            if data and isinstance(data, list):
+                return data[0]['lat'], data[0]['lon']
+        except Exception as e:
+            logger.debug(f"Geocoding failed: {e}")
+        return None
+    
+    def fetch_weather_and_aqi(self) -> str:
+        """
+        Fetch current temperature, humidity and AQI.
+        Requires OPENWEATHER_API_KEY in env. Location via WEATHER_LAT & WEATHER_LON
+        or WEATHER_CITY.
+        Returns a short human-friendly summary string.
+        """
+        if not self.openweather_key:
+            logger.warning("OPENWEATHER_API_KEY not configured. Skipping weather.")
+            return "Weather data not available."
+        
+        lat = None
+        lon = None
+        # priority: explicit lat/lon env, else city geocode
+        if self.weather_lat and self.weather_lon:
+            try:
+                lat = float(self.weather_lat)
+                lon = float(self.weather_lon)
+            except Exception:
+                lat = lon = None
+        
+        if (lat is None or lon is None) and self.weather_city:
+            coords = self._geocode_city(self.weather_city)
+            if coords:
+                lat, lon = coords
+        
+        if lat is None or lon is None:
+            logger.warning("Weather coordinates not available. Skipping weather.")
+            return "Weather data not available."
+        
+        try:
+            # Current weather
+            weather_url = "https://api.openweathermap.org/data/2.5/weather"
+            w_resp = requests.get(weather_url, params={'lat': lat, 'lon': lon, 'appid': self.openweather_key, 'units': 'metric'}, timeout=6)
+            w_resp.raise_for_status()
+            w = w_resp.json()
+            temp = w.get('main', {}).get('temp')
+            humidity = w.get('main', {}).get('humidity')
+            name = w.get('name') or self.weather_city or f"{lat:.2f},{lon:.2f}"
+            
+            # AQI
+            aqi_url = "http://api.openweathermap.org/data/2.5/air_pollution"
+            a_resp = requests.get(aqi_url, params={'lat': lat, 'lon': lon, 'appid': self.openweather_key}, timeout=6)
+            a_resp.raise_for_status()
+            a = a_resp.json()
+            aqi_value = None
+            if a and 'list' in a and len(a['list']) > 0:
+                aqi_value = a['list'][0].get('main', {}).get('aqi')
+            
+            # Map AQI value (OpenWeatherMap: 1..5) to description
+            aqi_map = {
+                1: "Good",
+                2: "Fair",
+                3: "Moderate",
+                4: "Poor",
+                5: "Very Poor"
+            }
+            aqi_desc = aqi_map.get(aqi_value, "Unknown") if aqi_value is not None else "Unknown"
+            
+            parts = []
+            if temp is not None:
+                parts.append(f"{round(temp)}°C")
+            if humidity is not None:
+                parts.append(f"Humidity: {humidity}%")
+            parts.append(f"AQI: {aqi_desc}" + (f" ({aqi_value})" if aqi_value is not None else ""))
+            
+            location_display = name
+            summary = f"Weather in {location_display}: " + ", ".join(parts) + "."
+            return summary
+        except Exception as e:
+            logger.debug(f"Error fetching weather/AQI: {e}")
+            return "Weather data not available."
+    
+    def generate_html_email(self, stories: List[Dict], affirmation: str, greeting: str, weather_summary: str) -> str:
+        """Generate beautiful HTML email with personalized greeting and weather intro."""
         today = datetime.now().strftime('%B %d, %Y')
         
         stories_html = ""
@@ -1193,6 +1316,19 @@ class MorningEmailGuardian:
             </div>
             """
         
+        # Intro block: greeting, weather, gratitude, transition
+        intro_html = f"""
+        <div style="margin-bottom: 18px; text-align: left;">
+            <h2 style="color: #d4738c; font-family: 'Georgia', serif; font-size: 22px; margin: 0 0 8px 0; font-weight: 400;">{greeting}</h2>
+            <p style="color: #7d5e67; font-family: 'Helvetica Neue', 'Arial', sans-serif; font-size: 14px; margin: 6px 0 6px 0;">
+                {weather_summary}
+            </p>
+            <p style="color: #7d5e67; font-family: 'Helvetica Neue', 'Arial', sans-serif; font-size: 14px; margin: 6px 0 6px 0;">
+                We are incredibly grateful for another chance to rise. Here is your curated positive morning news:
+            </p>
+        </div>
+        """
+        
         html = f"""
         <!DOCTYPE html>
         <html>
@@ -1209,7 +1345,7 @@ class MorningEmailGuardian:
                         margin: 0 auto; 
                         padding: 40px 20px;">
                 
-                <div style="text-align: center; margin-bottom: 40px;">
+                <div style="text-align: center; margin-bottom: 24px;">
                     <h1 style="color: #d4738c; 
                                font-family: 'Georgia', serif; 
                                font-size: 30px; 
@@ -1235,7 +1371,9 @@ class MorningEmailGuardian:
                     </p>
                 </div>
                 
-                <div style="margin-bottom: 40px;">
+                {intro_html}
+                
+                <div style="margin-bottom: 24px;">
                     {stories_html}
                 </div>
                 
@@ -1256,7 +1394,7 @@ class MorningEmailGuardian:
                 </div>
                 
                 <div style="text-align: center; 
-                            margin-top: 40px; 
+                            margin-top: 28px; 
                             padding-top: 24px;
                             border-top: 1px solid #f8d7e3;">
                     <p style="color: #c9a1ad; 
@@ -1278,8 +1416,16 @@ class MorningEmailGuardian:
         """Send the beautiful email."""
         if not self.smtp_username or not self.smtp_password:
             logger.warning("SMTP credentials not configured. Email not sent.")
-            logger.info("Email HTML content would be:")
+            logger.info("Email HTML content would be (preview truncated):")
             logger.info(html_content[:500] + "...")
+            # Still write preview for manual inspection
+            try:
+                safe_name = to_email.replace('@', '_at_').replace('.', '_')
+                with open(f'preview_email_{safe_name}.html', 'w', encoding='utf-8') as f:
+                    f.write(html_content)
+                logger.info(f"Email preview saved to preview_email_{safe_name}.html")
+            except Exception:
+                pass
             return False
         
         try:
@@ -1300,21 +1446,37 @@ class MorningEmailGuardian:
             return True
             
         except Exception as e:
-            logger.error(f"Error sending email: {str(e)}")
+            logger.error(f"Error sending email to {to_email}: {str(e)}")
             return False
     
-    def deliver_morning_glow(self, to_email: str, stories: List[Dict], affirmation: str) -> bool:
-        """Complete email delivery process."""
+    def deliver_morning_glow(self, recipients: List[str], stories: List[Dict], affirmation: str, owner_email: str = None) -> Dict[str, bool]:
+        """
+        Send personalized MorningGlow emails to a list of recipients.
+        Greeting logic:
+          - If recipient == owner_email -> "Good Morning Goddess"
+          - Else -> "Good Morning Gorgeous"
+        Each email includes live weather/AQI and the gratitude/intro line.
+        Returns dict mapping recipient -> success boolean.
+        """
+        results = {}
+        weather_summary = self.fetch_weather_and_aqi()
         today = datetime.now().strftime('%B %d, %Y')
         subject = f"🌸 Your MorningGlow - {today}"
         
-        html_content = self.generate_html_email(stories, affirmation)
+        for recipient in recipients:
+            recipient = recipient.strip()
+            if not recipient:
+                continue
+            if owner_email and recipient.lower() == owner_email.lower():
+                greeting = "Good Morning Goddess"
+            else:
+                greeting = "Good Morning Gorgeous"
+            
+            html_content = self.generate_html_email(stories, affirmation, greeting, weather_summary)
+            success = self.send_email(recipient, subject, html_content)
+            results[recipient] = success
         
-        with open('preview_email.html', 'w', encoding='utf-8') as f:
-            f.write(html_content)
-        logger.info("Email preview saved to preview_email.html")
-        
-        return self.send_email(to_email, subject, html_content)
+        return results
 
 
 class SilentGuardian:
@@ -1384,14 +1546,15 @@ def sacred_morning_flow_with_accuracy():
     logger.info(f"Daily affirmation: {affirmation}")
     
     email_guardian = MorningEmailGuardian()
-    recipient_email = os.getenv('RECIPIENT_EMAIL', 'user@example.com')
+    # RECIPIENT_EMAILS can be a comma-separated list
+    recipients_env = os.getenv('RECIPIENT_EMAILS') or os.getenv('RECIPIENT_EMAIL') or 'user@example.com'
+    recipients = [r.strip() for r in recipients_env.split(',') if r.strip()]
+    owner_email = os.getenv('OWNER_EMAIL')  # set this to your own email so you get Goddess greeting
     
-    success = email_guardian.deliver_morning_glow(recipient_email, final_stories, affirmation)
+    results = email_guardian.deliver_morning_glow(recipients, final_stories, affirmation, owner_email=owner_email)
     
-    if success:
-        logger.info("🌸 MorningGlow delivered successfully! 🌸")
-    else:
-        logger.info("🌸 MorningGlow preview generated (check preview_email.html) 🌸")
+    for r, ok in results.items():
+        logger.info(f"Email to {r}: {'sent' if ok else 'previewed/not-sent'}")
     
     logger.info("=" * 60)
     logger.info("Sacred morning ritual complete. Peace and beauty prevail.")
