@@ -21,14 +21,40 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
+      - name: Sanity check: important secrets present?
+        run: |
+          python - <<'PY'
+import os
+print("OPENWEATHER_API_KEY present:", bool(os.getenv("OPENWEATHER_API_KEY")))
+print("OPENAI_API_KEY present:", bool(os.getenv("OPENAI_API_KEY")))
+print("SMTP_USERNAME present:", bool(os.getenv("SMTP_USERNAME")))
+print("RECIPIENT_EMAIL present:", bool(os.getenv("RECIPIENT_EMAIL")))
+print("OWNER_EMAIL present:", bool(os.getenv("OWNER_EMAIL")))
+PY
+        env:
+          OPENWEATHER_API_KEY: ${{ secrets.OPENWEATHER_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          SMTP_USERNAME: ${{ secrets.SMTP_USERNAME }}
+          RECIPIENT_EMAIL: ${{ secrets.RECIPIENT_EMAIL }}
+          OWNER_EMAIL: ${{ secrets.OWNER_EMAIL }}
+
       - name: Run MorningGlow
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           NEWSAPI_KEY: ${{ secrets.NEWSAPI_KEY }}
+          OPENWEATHER_API_KEY: ${{ secrets.OPENWEATHER_API_KEY }}
           SMTP_SERVER: ${{ secrets.SMTP_SERVER }}
           SMTP_PORT: ${{ secrets.SMTP_PORT }}
           SMTP_USERNAME: ${{ secrets.SMTP_USERNAME }}
           SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
           FROM_EMAIL: ${{ secrets.FROM_EMAIL }}
           RECIPIENT_EMAIL: ${{ secrets.RECIPIENT_EMAIL }}
+          RECIPIENT_EMAILS: ${{ secrets.RECIPIENT_EMAILS }}
+          OWNER_EMAIL: ${{ secrets.OWNER_EMAIL }}
+          WEATHER_CITY: ${{ secrets.WEATHER_CITY }}
+          WEATHER_LAT: ${{ secrets.WEATHER_LAT }}
+          WEATHER_LON: ${{ secrets.WEATHER_LON }}
+          DEVICE_LAT: ${{ secrets.DEVICE_LAT }}
+          DEVICE_LON: ${{ secrets.DEVICE_LON }}
+          RECIPIENT_LOCATIONS: ${{ secrets.RECIPIENT_LOCATIONS }}
         run: python run.py
