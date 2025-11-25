@@ -1401,8 +1401,9 @@ class MorningEmailGuardian:
                               font-family: 'Helvetica Neue', 'Arial', sans-serif; 
                               font-size: 13px; 
                               margin: 0;">
-                        Love & Light🤍
-                        Sent with MorningGlow🌸 by Amulya N Rao
+                           Love & Light🤍 <br>
+                        Sent with MorningGlow🌸 <br>
+                           by Amulya N Rao
                     </p>
                 </div>
             </div>
