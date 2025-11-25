@@ -1411,7 +1411,7 @@ class MorningEmailGuardian:
             <h3 style="color: #d4738c; font-family: 'Georgia', serif; font-size: 20px; margin: 0 0 8px 0; font-weight: 400; text-align: center;">{greeting}</h3>
             {weather_html}
             <p style="color: #7d5e67; font-family: 'Georgia', sans-serif; font-size: 13px; margin: 6px 0 6px 0;">
-                We are incredibly grateful for another chance to rise now aren't we?. You are awesome! <br>
+                We are incredibly grateful for another chance to rise now, aren't we?<br>
                       Here is your curated positive morning news:
             </p>
         </div>
