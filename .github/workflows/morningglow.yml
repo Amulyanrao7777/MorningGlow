@@ -2,7 +2,7 @@ name: MorningGlow Daily
 
 on:
   schedule:
-    - cron: "30 3 * * *"   # Runs daily at 9:00 AM IST (03:30 UTC)
+    - cron: "20 2 * * *"   # Runs daily at 7:50 AM IST (02:20 UTC)
   workflow_dispatch:       # Lets you run it manually anytime
 
 jobs:
