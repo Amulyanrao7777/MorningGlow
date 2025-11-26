@@ -1422,7 +1422,7 @@ class MorningEmailGuardian:
           <div style="max-width:680px;margin:0 auto;padding:40px 20px;">
             <div style="text-align:center;margin-bottom:24px;">
               <h1 style="color:#d4738c;font-family:'Georgia',serif;font-size:30px;margin:0 0 8px 0;font-weight:300;letter-spacing:2px;">MorningGlow</h1>
-              <p style="color:#dca3b5;font-family:'Georgia',serif;font-size:14px;margin:6px 0 8px 0;font-style:italic;">-by Amulya N Rao</p>
+              <img src="https://github.com/Amulyanrao7777/MorningGlow/blob/3eaff7d1159a89beb26c43bc2231931aa88f9d6d/assets/signature.svg" alt="Amulya Signature" style="width:180px; display:block; margin:12px auto 0 auto; opacity:0.95;">
               <p style="color:#b89199;font-family:'Georgia',serif;font-size:16px;margin:0;font-style:italic;">{today}</p>
             </div>
             {intro_html}
