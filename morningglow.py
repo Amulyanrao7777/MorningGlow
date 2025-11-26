@@ -1432,7 +1432,7 @@ class MorningEmailGuardian:
             </div>
             <div style="text-align:center;margin-top:28px;padding-top:24px;border-top:1px solid #f8d7e3;">
               <p style="color:#c9a1ad;font-family:'Helvetica Neue',Arial,sans-serif;font-size:13px;margin:0;">Love & Light🤍 <br> Sent with MorningGlow🌸 <br></p>
-               <img src="https://drive.google.com/file/d/1PIJXNnTkK7ZCIa1PysngM5LOwV2nI30-/view?usp=sharing" alt="Signature" style="width:180px; opacity:0.92; margin-top:10px;"/>
+               <img src="https://drive.google.com/uc?export=view&id=1PIJXNnTkK7ZCIa1PysngM5LOwV2nI30-" alt="Signature" style="width:180px; opacity:0.92; margin-top:10px;"/>
             </div>
           </div>
         </body>
