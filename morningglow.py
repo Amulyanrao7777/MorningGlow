@@ -599,24 +599,24 @@ class StorySentTracker:
             return recent
         except: return []
     
-       def save_sent_stories(self, stories: List[Dict]) -> None:
+   def save_sent_stories(self, stories: List[Dict]) -> None:
         """Save newly sent stories with timestamp - keep full history."""
-        try:
-            if not os.path.exists(self.tracking_file):
-                all_sent = []
-            else:
-                with open(self.tracking_file, 'r') as f:
-                    all_sent = json.load(f)
+       try:
+           if not os.path.exists(self.tracking_file):
+            all_sent = []
+           else:
+               with open(self.tracking_file, 'r') as f:
+                   all_sent = json.load(f)
+                   
+           now = datetime.now().timestamp()
+           for story in stories:
+               all_sent.append({'url': story.get('url', ''), 'title': story.get('title', ''), 'sent_timestamp': now})
             
-            now = datetime.now().timestamp()
-            for story in stories:
-                all_sent.append({'url': story.get('url', ''), 'title': story.get('title', ''), 'sent_timestamp': now})
-            
-            with open(self.tracking_file, 'w') as f:
-                json.dump(all_sent, f, indent=2)
-            logger.info(f"Tracked {len(stories)} new stories sent. Total history: {len(all_sent)}")
-        except Exception as e:
-            logger.warning(f"Could not save sent stories: {e}")
+           with open(self.tracking_file, 'w') as f:
+               json.dump(all_sent, f, indent=2) 
+           logger.info(f"Tracked {len(stories)} new stories sent. Total history: {len(all_sent)}")
+      except Exception as e:
+          logger.warning(f"Could not save sent stories: {e}")
             
     def get_sent_urls(self) -> set:
         """Get set of URLs sent in last 24 hours."""
