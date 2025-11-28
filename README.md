@@ -204,14 +204,6 @@ MorningGlow is an intentional alternative: a small, consistent ritual of calm, v
 This project is licensed under the MIT License.
 See the LICENSE file for full details.
 
-markdown
-Copy code
-
-If you want, I can also:
-
-- Add a **“For Recruiters”** section that explicitly spells out what *you* did (great for your resume link)  
-- Or make a **shorter “lite” README** for GitHub and keep this as `docs/OVERVIEW.md`.
-::contentReference[oaicite:0]{index=0}
 
 
 
