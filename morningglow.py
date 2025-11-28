@@ -28,7 +28,7 @@ logger = logging.getLogger(__name__)
 class SourceOrchestrator:
     """
     Fetches real-time news from NewsAPI and Google News RSS.
-    Validates URLs, ensures sources are legitimate, and filters by recency (14 days).
+    Validates URLs, ensures sources are legitimate, and filters by recency (24 hours).
     """
     
     def __init__(self):
@@ -37,13 +37,13 @@ class SourceOrchestrator:
         self.google_news_rss = 'https://news.google.com/rss/search?q={query}&hl=en-US&gl=US&ceid=US:en'
         
     def fetch_newsapi_articles(self, query: str, page_size: int = 100) -> List[Dict]:
-        """Fetch articles from NewsAPI within the last 14 days."""
+        """Fetch articles from NewsAPI within the last 24 hours only."""
         if not self.newsapi_key:
             logger.warning("NewsAPI key not found. Skipping NewsAPI fetch.")
             return []
         
         try:
-            fourteen_days_ago = (datetime.now() - timedelta(days=14)).isoformat()
+            one_day_ago = (datetime.now() - timedelta(hours=24)).isoformat()
             
             params = {
                 'q': query,
@@ -51,7 +51,7 @@ class SourceOrchestrator:
                 'language': 'en',
                 'sortBy': 'publishedAt',
                 'pageSize': page_size,
-                'from': fourteen_days_ago
+                'from': one_day_ago
             }
             
             response = requests.get(self.newsapi_url, params=params, timeout=10)
@@ -71,18 +71,18 @@ class SourceOrchestrator:
             return []
     
     def fetch_google_news_rss(self, query: str) -> List[Dict]:
-        """Fetch articles from Google News RSS feed."""
+        """Fetch articles from Google News RSS feed (last 24 hours only)."""
         try:
             feed_url = self.google_news_rss.format(query=quote(query))
             feed = feedparser.parse(feed_url)
             
             articles = []
-            fourteen_days_ago = datetime.now() - timedelta(days=14)
+            one_day_ago = datetime.now() - timedelta(hours=24)
             
             for entry in feed.entries[:50]:
                 try:
                     published = datetime(*entry.published_parsed[:6])
-                    if published >= fourteen_days_ago:
+                    if published >= one_day_ago:
                         url = entry.link.replace(' ', '')
                         
                         articles.append({
