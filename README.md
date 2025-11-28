@@ -1,83 +1,220 @@
-# 🌸 MorningGlow
+# 🌤️ MorningGlow
 
-A production-grade, emotionally-safe news curation system that delivers beautiful, verified positive news every morning.
+**MorningGlow** is a production-grade, emotionally-safe news curation system that sends you a gentle, beautifully formatted email with **verified positive stories every morning**.
 
-## ✨ Features
+It combines real-time news sources, safety & accuracy filters, and AI-written summaries to make sure your inbox starts the day with calm, not chaos.
 
-- **Real-Time News Fetching**: Pulls verified news from NewsAPI and Google News RSS feeds
-- **A Filter System**: 9-category emotional safety filter ensuring only gentle, positive content
-- **Factual Accuracy Guardian**: Rejects speculation, clickbait, and unverified claims
-- **AI-Powered Summaries**: Warm, feminine summaries (6-7 sentences, 150-170 words) using OpenAI
-- **Content Guarantee**: Always delivers 3-5 beautiful stories with emergency fallback stories
-- **Beautiful HTML Emails**: Soft pink/rose aesthetic with gentle typography and daily affirmations
+---
 
-## 🌿 The A Filter Categories
+## ✨ Key Features
 
-1. **Environment Healing** - Coral restoration, reforestation, wildlife conservation
-2. **Medical Hope** - Clinical trials, FDA approvals, verified health breakthroughs
-3. **Peace & Harmony** - Diplomatic resolutions, cooperation, unity
-4. **Human Kindness** - Volunteers, charity, heartwarming rescues
-5. **Education Wins** - Scholarships, student achievements, inspiring teachers
-6. **Women Empowerment** - Women-led initiatives, female leadership
-7. **Ethical Innovation** - Renewable energy, accessibility tech, sustainable engineering
-8. **Art & Culture** - Museums, cultural festivals, creative projects
-9. **Feel-Good** - Gentle, heartwarming, uplifting stories
+- **Real-time curated news**
+  - Pulls stories from **NewsAPI** and **Google News RSS**.
+  - Focuses only on credible sources.
 
-## 🚀 Setup
+- **Emotional safety filter (“A Filter”)**
+  - 9 themed categories of safe, uplifting news:
+    1. Environment Healing  
+    2. Medical Hope  
+    3. Peace & Harmony  
+    4. Human Kindness  
+    5. Education Wins  
+    6. Women Empowerment  
+    7. Ethical Innovation  
+    8. Art & Culture  
+    9. Feel-Good  
+  - Filters out crisis content, violence, panic, and stress-heavy stories.
 
-1. **Install Dependencies**:
-   ```bash
-   # Dependencies are already installed via uv
-   ```
+- **Factual accuracy guardrails**
+  - Rejects obvious clickbait, speculation, and unverified claims before summarizing.
+  - Never fabricates news: summaries are always grounded in the original articles.
 
-2. **Configure Environment Variables**:
-   ```bash
-   cp .env.example .env
-   ```
+- **AI-powered warm summaries**
+  - Uses **OpenAI** to write soft, human, hopeful summaries.
+  - Each story is ~6–7 sentences (~150–170 words), written in a calm, reassuring tone.
 
-3. **Edit `.env` with your credentials**:
-   - `NEWSAPI_KEY`: Get from https://newsapi.org/
-   - `OPENAI_API_KEY`: Get from https://platform.openai.com/api-keys
-   - `SMTP_USERNAME`, `SMTP_PASSWORD`: Your email credentials
-   - `RECIPIENT_EMAIL`: Where to send MorningGlow
+- **Content guarantee**
+  - Always sends **3–5 good stories**.
+  - Has fallback stories ready in case sources are sparse.
 
-## 📧 Usage
+- **Beautiful HTML email**
+  - Soft, rose-toned aesthetic.
+  - Gentle typography, structured layout, and a daily affirmation.
+  - Previewable locally via `preview_email.html`.
 
-Run MorningGlow:
+---
+
+## 🏗️ System Architecture
+
+MorningGlow is built as a set of focused components that work together:
+
+- **SourceOrchestrator**  
+  Coordinates multiple sources (NewsAPI + Google News RSS), validates URLs, and collects candidate stories.
+
+- **FactualAccuracyGuardian**  
+  Applies basic verification & anti-clickbait checks so only trustworthy stories are allowed into the pipeline.
+
+- **EmotionalSafetyFilter**  
+  Implements the 9-category A Filter to keep only emotionally-safe, uplifting content.
+
+- **SummaryGenerator**  
+  Uses OpenAI to generate warm, humanlike summaries while staying grounded to the original article.
+
+- **ContentProcessor**  
+  Orchestrates the full pipeline: fetch → filter → verify → summarize → select → package.
+
+- **ContentGuarantee**  
+  Ensures there are always 3–5 stories by falling back to pre-validated “evergreen” positive stories if needed.
+
+- **MorningEmailGuardian**  
+  Builds the final HTML email: layout, colors, sections, affirmation, and links.
+
+- **SilentGuardian**  
+  Handles logging and errors quietly so the user gets a seamless experience without noisy error mails.
+
+---
+
+## 🧰 Tech Stack
+
+- **Language:** Python  
+- **News Sources:** NewsAPI, Google News RSS  
+- **AI:** OpenAI API for summaries  
+- **Email:** SMTP (HTML emails)  
+- **Environment & Dependencies:**  
+  - `pyproject.toml` / `uv.lock` (for `uv`-based workflows)  
+  - `requirements.txt` (for classic `pip` installs)  
+- **Other:** Logging, JSON storage (`sent_stories.json`) for deduplication
+
+---
+
+## 🚀 Getting Started
+
+### 1. Clone the repository
+
 ```bash
+git clone https://github.com/Amulyanrao7777/MorningGlow.git
+cd MorningGlow
+2. Install dependencies
+Using pip:
+
+bash
+Copy code
+pip install -r requirements.txt
+If you’re using uv or another modern environment manager, you can also rely on pyproject.toml / uv.lock.
+
+3. Configure environment variables
+Copy the example file and edit your credentials:
+
+bash
+Copy code
+cp .env.example .env
+Open .env and fill in:
+
+NEWSAPI_KEY – from https://newsapi.org
+
+OPENAI_API_KEY – from https://platform.openai.com/api-keys
+
+SMTP_USERNAME / SMTP_PASSWORD – your email credentials (app password recommended)
+
+RECIPIENT_EMAIL – where MorningGlow will send the curated newsletter
+
+(If .env.example includes additional fields like SMTP host/port, configure those as well.)
+
+▶️ Usage
+Run MorningGlow manually:
+
+bash
+Copy code
 python morningglow.py
-```
+On each run, MorningGlow will:
 
-The system will:
-1. Fetch real-time news from multiple sources
-2. Apply accuracy checks and emotional safety filters
-3. Generate warm, gentle summaries
-4. Ensure 3-5 stories are selected
-5. Create a beautiful HTML email
-6. Send to your configured recipient email
+Fetch fresh stories from NewsAPI + Google News RSS
 
-## 🔒 Privacy & Safety
+Apply factual accuracy checks
 
-- Never disturbs you with technical errors (SilentGuardian)
-- Rejects all stress-inducing, crisis-focused, or negative content
-- Verifies factual accuracy before processing
-- Never hallucinates or fabricates news
+Filter using the 9-category emotional safety filter
 
-## 🎨 Email Preview
+Generate warm summaries using OpenAI
 
-The system saves an HTML preview to `preview_email.html` that you can open in your browser to see the beautiful email design.
+Ensure 3–5 stories make it through (using fallbacks if needed)
 
-## 🛡️ System Architecture
+Render a beautiful HTML email
 
-- **SourceOrchestrator**: Multi-source news fetching with URL validation
-- **FactualAccuracyGuardian**: Verification and anti-clickbait protection
-- **EmotionalSafetyFilter**: 9-category A filter implementation
-- **SummaryGenerator**: OpenAI-powered warm summary creation
-- **ContentProcessor**: Complete processing pipeline orchestration
-- **ContentGuarantee**: Emergency fallback stories system
-- **MorningEmailGuardian**: Beautiful HTML email generation
-- **SilentGuardian**: Error handling without user disturbance
+Send it to RECIPIENT_EMAIL via SMTP
 
-## 💝 Philosophy
+Save a local preview as preview_email.html
 
-MorningGlow is built on the principle that how we start our day matters. Every morning deserves to feel like soft sunlight - gentle, warm, and full of hope.
+You can open preview_email.html in your browser to see exactly what the email looks like.
+
+⏰ Automation & Scheduling
+You can schedule MorningGlow to run every morning.
+
+On Linux / macOS (Cron)
+Edit your crontab:
+
+bash
+Copy code
+crontab -e
+Add a line like:
+
+bash
+Copy code
+0 7 * * * /usr/bin/python3 /path/to/MorningGlow/morningglow.py >> /path/to/MorningGlow/logs/cron.log 2>&1
+This runs it every day at 7:00 AM.
+
+On Windows (Task Scheduler)
+Create a new Basic Task
+
+Trigger: Daily at your chosen time
+
+Action: Start a program → python.exe
+
+Arguments: C:\path\to\MorningGlow\morningglow.py
+
+With GitHub Actions
+There is a .github/workflows directory in this repo.
+You can configure a scheduled workflow (cron) to run MorningGlow on a server or container, if desired.
+
+🔒 Privacy & Safety
+No user data is stored beyond what’s needed to send the email.
+
+Stories are pulled only from external news APIs / RSS feeds.
+
+The system is designed to avoid crisis-heavy or triggering content.
+
+Summaries are generated with guardrails so that the model does not invent news.
+
+📸 Email Preview
+Every run writes a preview file: preview_email.html
+
+You can also find branding assets (like the logo / header) inside the assets/ folder.
+
+Open the preview file in any browser to iterate on colors, fonts, or layout.
+
+🌱 Philosophy
+MorningGlow is built around a simple idea:
+
+How you start your day matters.
+
+Most news feeds begin with stress, conflict, and urgency.
+MorningGlow is an intentional alternative: a small, consistent ritual of calm, verified, hopeful information that doesn’t ignore reality but chooses to spotlight healing, progress, and kindness.
+
+
+📄 License
+This project is licensed under the MIT License.
+See the LICENSE file for full details.
+
+markdown
+Copy code
+
+If you want, I can also:
+
+- Add a **“For Recruiters”** section that explicitly spells out what *you* did (great for your resume link)  
+- Or make a **shorter “lite” README** for GitHub and keep this as `docs/OVERVIEW.md`.
+::contentReference[oaicite:0]{index=0}
+
+
+
+
+
+
