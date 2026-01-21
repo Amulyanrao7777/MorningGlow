@@ -716,4 +716,438 @@ class ContentGuarantee:
         {
             'id': 'emergency_garden_1',
             'title': 'A Community\'s Gentle Gift: Neighbors Create Beautiful Garden',
-            'summary': 'In a heartwarming display of community love, neighbors came together to create something truly special. With gentle hands and caring hearts, they transformed a neglected space into a serene garden sanctuary for elderly residents. Soft pet
+            'summary': 'In a heartwarming display of community love, neighbors came together to create something truly special. With gentle hands and caring hearts, they transformed a neglected space into a serene garden sanctuary for elderly residents. Soft petals of roses and lavender now greet visitors, while comfortable benches offer peaceful resting spots. The project brought together volunteers of all ages, each contributing their unique gifts to this labor of love. Now, seniors can enjoy morning sunshine surrounded by blooming flowers, butterflies dancing on the breeze, and the warm companionship of neighbors who truly care. This beautiful gesture shows how small acts of kindness can blossom into lasting joy.',
+            'url': 'https://www.good.is/articles/community-gardens',
+            'source': 'Community News',
+            'published_at': datetime.now().isoformat(),
+            'amulya_categories': ['human_kindness']
+        },
+        {
+            'id': 'emergency_students_1',
+            'title': 'Young Scientists Shine: Students\' Environmental Project Wins Recognition',
+            'summary': 'A group of dedicated students has captured hearts and minds with their innovative environmental project. These young changemakers designed a beautiful system to purify water using natural, sustainable materials. Their gentle approach combines scientific knowledge with deep care for the planet, creating solutions that work in harmony with nature. Teachers describe watching these students blossom as they worked together, supporting each other through challenges and celebrating every small victory. The project has now inspired other schools to embrace similar initiatives, spreading ripples of positive change. These bright young minds remind us that the future is in caring, capable hands, and that hope grows wherever passion meets purpose.',
+            'url': 'https://www.smithsonianmag.com/innovation/',
+            'source': 'Education Today',
+            'published_at': datetime.now().isoformat(),
+            'amulya_categories': ['education_wins', 'environment_healing']
+        },
+        {
+            'id': 'emergency_butterfly_1',
+            'title': 'Butterfly Haven: Restored Meadow Becomes Sanctuary for Endangered Species',
+            'summary': 'A once-barren field has transformed into a breathtaking butterfly sanctuary, filled with gentle wings and colorful blooms. Conservation teams carefully planted native wildflowers, creating a soft tapestry of colors that dance in the breeze. Endangered butterfly species have returned to this haven, their delicate presence a sign of healing and hope. Visitors now walk among peaceful meadows, watching these beautiful creatures flutter from flower to flower. The sanctuary has become a place of wonder, where families can witness nature\'s quiet magic and children can learn about protecting our precious ecosystems. This transformation shows how dedication and gentle care can bring endangered beauty back to life.',
+            'url': 'https://www.xerces.org/blog',
+            'source': 'Wildlife Conservation',
+            'published_at': datetime.now().isoformat(),
+            'amulya_categories': ['environment_healing']
+        },
+        {
+            'id': 'emergency_women_energy_1',
+            'title': 'Women-Led Initiative Brings Clean Energy to Rural Communities',
+            'summary': 'A team of inspiring women engineers has created a beautiful solution that brings light and hope to remote villages. Their solar energy project combines technical excellence with deep compassion, ensuring that families can now enjoy clean, sustainable power. These remarkable women worked alongside community members, teaching and empowering them to maintain the systems themselves. The soft glow of solar-powered lights now illuminates homes, schools, and community centers, replacing the darkness with gentle, reliable brightness. Children can study in the evenings, and families can gather safely after sunset. This woman-led initiative demonstrates how innovation rooted in care and understanding can transform lives and create lasting positive change in the world.',
+            'url': 'https://www.un.org/en/climatechange/climate-solutions/renewable-energy',
+            'source': 'Sustainable Future',
+            'published_at': datetime.now().isoformat(),
+            'amulya_categories': ['women_empowerment', 'ethical_innovation']
+        }
+    ]
+    
+    AFFIRMATIONS = [
+        "I am the woman who rises every time life tests me",
+        "I am built for expansion, evolution, and elevation",
+        "I am choosing myself with a conviction that cannot be shaken",
+        "I am becoming more powerful every time something challenges me",
+        "I am the universe's favorite girl and I walk like it",
+        "I am growing through what others get broken by",
+        "I am always protected, always aligned, always guided",
+        "I am the kind of woman who turns pain into portals",
+        "I am destined for a life so big it surprises even me",
+        "I am walking toward a future that is already mine"
+    ]
+    
+    def ensure_minimum_stories(self, articles: List[Dict], minimum: int = 3, maximum: int = 5) -> List[Dict]:
+        """Ensure we have 3-5 stories, filtering out recently sent ones."""
+        tracker = StorySentTracker()
+        sent_ids = tracker.get_sent_ids()
+        
+        # Filter out recently sent stories (check both URL and ID)
+        filtered_articles = []
+        for a in articles:
+            story_id = tracker._get_story_id(a)
+            if story_id not in sent_ids:
+                filtered_articles.append(a)
+        
+        logger.info(f"✓ Filtered {len(articles)-len(filtered_articles)} recently sent stories, {len(filtered_articles)} new available")
+        
+        if len(filtered_articles) >= minimum:
+            logger.info(f"✓ Sufficient new articles available: {len(filtered_articles)}")
+            selected = filtered_articles[:maximum]
+            tracker.save_sent_stories(selected)
+            return selected
+        
+        needed = minimum - len(filtered_articles)
+        logger.warning(f"⚠️ Insufficient new articles ({len(filtered_articles)}). Adding {needed} emergency stories.")
+        
+        # Select emergency stories that haven't been sent recently
+        import random
+        available_emergency = []
+        for story in self.EMERGENCY_STORIES:
+            story_id = story.get('id', tracker._get_story_id(story))
+            if story_id not in sent_ids:
+                available_emergency.append(story)
+        
+        if len(available_emergency) < needed:
+            logger.warning(f"⚠️ All emergency stories recently used! Cycling through them anyway.")
+            available_emergency = self.EMERGENCY_STORIES
+        
+        emergency_selection = random.sample(available_emergency, min(needed, len(available_emergency)))
+        
+        combined = filtered_articles + emergency_selection
+        final_stories = combined[:maximum]
+        tracker.save_sent_stories(final_stories)
+        return final_stories
+    
+    def get_daily_affirmation(self) -> str:
+        """Get a beautiful affirmation for the day."""
+        import random
+        return random.choice(self.AFFIRMATIONS)
+
+
+class MorningEmailGuardian:
+    """
+    Weather + AQI aware email generator.
+    """
+
+    def __init__(self):
+        self.smtp_server = os.getenv('SMTP_SERVER', 'smtp.gmail.com')
+        self.smtp_port = int(os.getenv('SMTP_PORT', '587'))
+        self.smtp_username = os.getenv('SMTP_USERNAME')
+        self.smtp_password = os.getenv('SMTP_PASSWORD')
+        self.from_email = os.getenv('FROM_EMAIL', self.smtp_username)
+        self.openweather_key = os.getenv('OPENWEATHER_API_KEY')
+        self.weather_city = os.getenv('WEATHER_CITY')
+        self.weather_lat = os.getenv('WEATHER_LAT')
+        self.weather_lon = os.getenv('WEATHER_LON')
+        self.device_lat = os.getenv('DEVICE_LAT')
+        self.device_lon = os.getenv('DEVICE_LON')
+
+    def _geocode_city(self, city: str) -> Optional[Tuple[float, float]]:
+        if not self.openweather_key or not city:
+            return None
+        url = "https://api.openweathermap.org/geo/1.0/direct"
+        candidates = [city.strip(), f"{city}, IN", f"{city}, India"]
+        for c in candidates:
+            try:
+                resp = requests.get(url, params={'q': c, 'limit': 1, 'appid': self.openweather_key}, timeout=6)
+                resp.raise_for_status()
+                data = resp.json()
+                if data and len(data) > 0:
+                    return float(data[0]['lat']), float(data[0]['lon'])
+            except:
+                continue
+        return None
+
+    def _resolve_coords(self, lat: Optional[float], lon: Optional[float], city: Optional[str]) -> Optional[Tuple[float, float]]:
+        if lat is not None and lon is not None:
+            return float(lat), float(lon)
+        if self.device_lat and self.device_lon:
+            try:
+                return float(self.device_lat), float(self.device_lon)
+            except:
+                pass
+        if self.weather_lat and self.weather_lon:
+            try:
+                return float(self.weather_lat), float(self.weather_lon)
+            except:
+                pass
+        target_city = (city or self.weather_city or "").strip()
+        if target_city:
+            return self._geocode_city(target_city)
+        return None
+
+    def _owm_aqi_desc(self, value: Optional[int]) -> str:
+        aqi_map = {1: "Good", 2: "Fair", 3: "Moderate", 4: "Poor", 5: "Very Poor"}
+        return aqi_map.get(value, "Unknown")
+
+    def _aqi_health_advice(self, value: Optional[int]) -> str:
+        if value is None:
+            return ""
+        adv = {
+            1: "Air quality is good. No special precautions.",
+            2: "Air quality is fair. Sensitive people may consider light precautions.",
+            3: "Air quality is moderate. Consider limiting prolonged outdoor exertion.",
+            4: "Air quality is poor. Sensitive groups should avoid heavy outdoor exertion.",
+            5: "Air quality is very poor. Avoid outdoor activity; consider masks/filters."
+        }
+        return adv.get(value, "")
+
+    def fetch_weather_and_aqi(self, lat: Optional[float] = None, lon: Optional[float] = None, city: Optional[str] = None) -> Dict:
+        if not self.openweather_key:
+            return {"summary": "Weather data not available."}
+
+        resolved = self._resolve_coords(lat, lon, city)
+        if not resolved:
+            return {"summary": "Weather data not available."}
+        lat, lon = resolved
+
+        try:
+            weather_url = "https://api.openweathermap.org/data/2.5/weather"
+            w_resp = requests.get(weather_url, params={'lat': lat, 'lon': lon, 'appid': self.openweather_key, 'units': 'metric'}, timeout=6)
+            w_resp.raise_for_status()
+            w = w_resp.json()
+            temp = w.get('main', {}).get('temp')
+            humidity = w.get('main', {}).get('humidity')
+            location_name = city or self.weather_city or "your area"
+        except Exception as e:
+            logger.debug(f"Error fetching weather: {e}")
+            return {"summary": "Weather data not available."}
+
+        aqi_value = None
+        components = None
+        try:
+            aqi_url = "https://api.openweathermap.org/data/2.5/air_pollution"
+            a_resp = requests.get(aqi_url, params={'lat': lat, 'lon': lon, 'appid': self.openweather_key}, timeout=6)
+            a_resp.raise_for_status()
+            a = a_resp.json()
+            if a and 'list' in a and len(a['list']) > 0:
+                aqi_value = a['list'][0].get('main', {}).get('aqi')
+                components = a['list'][0].get('components', {})
+        except:
+            pass
+
+        aqi_desc = self._owm_aqi_desc(aqi_value)
+        parts = []
+        if temp is not None:
+            parts.append(f"{round(temp)}°C")
+        if humidity is not None:
+            parts.append(f"Humidity: {humidity}%")
+        parts.append(f"AQI: {aqi_desc}" + (f" ({aqi_value})" if aqi_value else ""))
+
+        summary = f"Weather in {location_name}: " + ", ".join(parts) + "."
+
+        return {
+            "location": location_name,
+            "temp_c": temp,
+            "humidity": humidity,
+            "summary": summary,
+            "aqi": {"value": aqi_value, "desc": aqi_desc, "components": components or {}},
+            "advice": self._aqi_health_advice(aqi_value)
+        }
+
+    def generate_html_email(self, stories: List[Dict], affirmation: str, greeting: str, weather_info) -> str:
+        today = datetime.now().strftime('%B %d, %Y')
+
+        weather_html = ""
+        if isinstance(weather_info, dict):
+            temp = weather_info.get("temp_c")
+            humidity = weather_info.get("humidity")
+            aqi_val = weather_info.get("aqi", {}).get("value")
+            aqi_desc = weather_info.get("aqi", {}).get("desc")
+            advice = weather_info.get("advice", "")
+
+            weather_html = f"""
+                <p style="font-family: 'Cormorant Garamond', 'Playfair Display', Georgia, serif; 
+                          color:#7d5e67; font-size:16px; line-height:1.7;">
+                    Weather report for today: 
+                    Temperature is {round(temp)}°C, humidity is {humidity}%, 
+                    and AQI is {aqi_desc} ({aqi_val}).
+                </p>
+                <p style="font-family: 'Cormorant Garamond', 'Playfair Display', Georgia, serif; 
+                          color:#b89199; font-size:15px;">
+                    {advice}
+                </p>
+            """
+        else:
+            weather_html = "<p>Weather data not available.</p>"
+
+        stories_html = ""
+        for i, story in enumerate(stories, 1):
+            published_date = story.get('published_at', 'Date not available')
+            if published_date and published_date != 'Date not available':
+                try:
+                    from datetime import datetime as dt
+                    parsed_date = dt.fromisoformat(published_date.replace('Z', '+00:00'))
+                    published_date = parsed_date.strftime('%B %d, %Y at %I:%M %p')
+                except:
+                    pass
+            stories_html += f"""
+            <div style="background: linear-gradient(135deg, #fff5f7 0%, #ffe9f0 100%); 
+                        border-radius: 16px; 
+                        padding: 28px; 
+                        margin-bottom: 24px;
+                        box-shadow: 0 4px 12px rgba(251, 207, 232, 0.15);">
+                <h2 style="color: #d4738c; font-family: 'Georgia', serif; font-size: 18px; margin: 0 0 12px 0; line-height: 1.3; font-weight: 600;">
+                    {story.get('title', 'Untitled')}
+                </h2>
+                <p style="color: #b89199; font-family: 'Helvetica Neue', 'Arial', sans-serif; font-size: 11px; margin: 0 0 10px 0; font-style: italic;">
+                    Published: {published_date}
+                </p>
+                <p style="color: #7d5e67; font-family: 'Helvetica Neue', 'Arial', sans-serif; font-size: 14px; line-height: 1.6; margin: 0 0 14px 0; text-align: justify;">
+                    {story.get('summary', '')}
+                </p>
+                <a href="{story.get('url', '#')}" style="color: #e08fa3; text-decoration: none; font-family: 'Helvetica Neue', 'Arial', sans-serif; font-size: 12px; font-weight: 500;">
+                    Read full article →
+                </a>
+            </div>
+            """
+
+        intro_html = f"""
+        <div style="margin-bottom: 18px; text-align: center;">
+            <h3 style="color: #d4738c; font-family: 'Georgia', serif; font-size: 20px; margin: 0 0 8px 0; font-weight: 400; text-align: center;">{greeting}</h3>
+            {weather_html}
+            <p style="color: #7d5e67; font-family: 'Georgia', sans-serif; font-size: 13px; margin: 6px 0 6px 0;">
+                We are incredibly grateful for another chance to rise now, aren't we?<br>
+                Here is your curated positive morning news:
+            </p>
+        </div>
+        """
+
+        html = f"""
+        <!DOCTYPE html>
+        <html>
+        <head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>MorningGlow - {today}</title></head>
+        <body style="margin:0;padding:0;background:linear-gradient(to bottom,#fff9fb,#ffeff5);font-family:'Helvetica Neue',Arial,sans-serif;">
+          <div style="max-width:680px;margin:0 auto;padding:40px 20px;">
+            <div style="text-align:center;margin-bottom:24px;">
+              <h1 style="color:#d4738c;font-family:'Georgia',serif;font-size:30px;margin:0 0 8px 0;font-weight:300;letter-spacing:2px;">MorningGlow</h1>
+              <p style="color:#dca3b5;font-family:'Georgia',serif;font-size:14px;margin:6px 0 8px 0;font-style:italic;">-by Amulya N Rao</p>
+              <p style="color:#b89199;font-family:'Georgia',serif;font-size:16px;margin:0;font-style:italic;">{today}</p>
+            </div>
+            {intro_html}
+            <div style="margin-bottom:24px;">{stories_html}</div>
+            <div style="background: linear-gradient(135deg, #ffd9e8 0%, #ffb3d1 100%); border-radius:16px; padding:32px; text-align:center; border:2px solid #ffc4dd; box-shadow:0 6px 20px rgba(251,207,232,0.25);">
+              <p style="color:#000000;font-family:'Georgia',serif;font-size:18px;line-height:1.7;margin:0;font-style:italic;">{affirmation}</p>
+            </div>
+            <div style="text-align:center;margin-top:28px;padding-top:24px;border-top:1px solid #f8d7e3;">
+              <p style="color:#c9a1ad;font-family:'Helvetica Neue',Arial,sans-serif;font-size:13px;margin:0;">Love & Light🤍 <br> Sent with MorningGlow🌸 <br></p>
+               <img src="https://drive.google.com/uc?export=view&id=1PIJXNnTkK7ZCIa1PysngM5LOwV2nI30-" alt="Signature" style="width:180px; opacity:0.92; margin-top:10px;"/>
+            </div>
+          </div>
+        </body>
+        </html>
+        """
+        return html
+
+    def send_email(self, to_email: str, subject: str, html_content: str) -> bool:
+        if not self.smtp_username or not self.smtp_password:
+            logger.warning("SMTP credentials not configured. Saving preview instead.")
+            try:
+                safe_name = to_email.replace('@', '_at_').replace('.', '_')
+                with open(f'preview_email_{safe_name}.html', 'w', encoding='utf-8') as f:
+                    f.write(html_content)
+                logger.info(f"✓ Email preview saved to preview_email_{safe_name}.html")
+            except:
+                pass
+            return False
+        try:
+            msg = MIMEMultipart('alternative')
+            msg['From'] = self.from_email
+            msg['To'] = to_email
+            msg['Subject'] = subject
+            html_part = MIMEText(html_content, 'html', 'utf-8')
+            msg.attach(html_part)
+            with smtplib.SMTP(self.smtp_server, self.smtp_port) as server:
+                server.starttls()
+                server.login(self.smtp_username, self.smtp_password)
+                server.send_message(msg)
+            logger.info(f"✓ Email sent successfully to {to_email}")
+            return True
+        except Exception as e:
+            logger.error(f"✗ Error sending email to {to_email}: {str(e)}")
+            return False
+
+    def deliver_morning_glow(self, recipients: List[str], stories: List[Dict], affirmation: str,
+                             owner_email: str = None, recipient_locations: Optional[Dict[str, Dict]] = None) -> Dict[str, bool]:
+        results = {}
+        subject = f"🌸 Your MorningGlow - {datetime.now().strftime('%B %d, %Y')}"
+        if owner_email:
+            owner_email = owner_email.strip().lower()
+        for recipient in recipients:
+            recipient = recipient.strip()
+            if not recipient:
+                continue
+            greeting = "Good Morning Gorgeous!"
+            if owner_email and recipient.strip().lower() == owner_email:
+                greeting = "Good Morning Goddess!"
+
+            override = (recipient_locations or {}).get(recipient, {}) or {}
+            lat = override.get('lat')
+            lon = override.get('lon')
+            city = override.get('city')
+
+            weather_info = self.fetch_weather_and_aqi(lat=lat, lon=lon, city=city)
+            html_content = self.generate_html_email(stories, affirmation, greeting, weather_info)
+            success = self.send_email(recipient, subject, html_content)
+            results[recipient] = success
+
+        return results
+
+
+class SilentGuardian:
+    @staticmethod
+    def safe_execute(func, *args, **kwargs):
+        try:
+            return func(*args, **kwargs)
+        except Exception as e:
+            logger.error(f"Silent error in {func.__name__}: {str(e)}")
+            return None
+    
+    @staticmethod
+    def ensure_ritual(func):
+        def wrapper(*args, **kwargs):
+            try:
+                return func(*args, **kwargs)
+            except Exception as e:
+                logger.error(f"Critical error in {func.__name__}: {str(e)}")
+                logger.info("Ensuring ritual continues with emergency measures...")
+                return None
+        return wrapper
+
+
+@SilentGuardian.ensure_ritual
+def sacred_morning_flow_with_accuracy():
+    logger.info("=" * 60)
+    logger.info("🌸 MorningGlow - Sacred Morning Flow Beginning 🌸")
+    logger.info("=" * 60)
+    
+    search_queries = [
+        'breakthrough medical discovery healing',
+        'women leaders innovation success',
+        'renewable energy milestone achievement',
+        'student wins national award',
+        'community volunteers together help',
+        'endangered species recovery wildlife',
+        'human kindness heartwarming story',
+        'clean water project development',
+        'education access opportunity',
+        'climate positive environmental win'
+    ]
+    
+    processor = ContentProcessor()
+    processed_articles = processor.process_news(search_queries)
+    
+    guarantee = ContentGuarantee()
+    final_stories = guarantee.ensure_minimum_stories(processed_articles, minimum=3, maximum=5)
+    affirmation = guarantee.get_daily_affirmation()
+    
+    logger.info(f"✓ Final story count: {len(final_stories)}")
+    logger.info(f"✓ Daily affirmation selected")
+    
+    email_guardian = MorningEmailGuardian()
+    recipients_env = os.getenv('RECIPIENT_EMAILS') or os.getenv('RECIPIENT_EMAIL') or 'user@example.com'
+    recipients = [r.strip() for r in recipients_env.split(',') if r.strip()]
+    owner_email = os.getenv('OWNER_EMAIL')
+    
+    results = email_guardian.deliver_morning_glow(recipients, final_stories, affirmation, owner_email=owner_email)
+    
+    for r, ok in results.items():
+        logger.info(f"{'✓' if ok else '✗'} Email to {r}: {'sent' if ok else 'preview saved'}")
+    
+    logger.info("=" * 60)
+    logger.info("🌸 Sacred morning ritual complete 🌸")
+    logger.info("=" * 60)
+    
+    return final_stories
+
+
+if __name__ == "__main__":
+    sacred_morning_flow_with_accuracy()
