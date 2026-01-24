@@ -1109,46 +1109,47 @@ def sacred_morning_flow_with_accuracy():
     logger.info("🌸 MorningGlow - Sacred Morning Flow Beginning 🌸")
     logger.info("=" * 60)
     
-    # BROADER QUERIES - More likely to fetch results
+    # BALANCED QUERIES - Specific enough to be positive, broad enough to get results
     search_queries = [
-        # Medical & Health (broader)
-        'medical breakthrough',
-        'health innovation',
-        'new treatment approved',
+        # Medical & Health - positive framing
+        'medical breakthrough approved',
+        'new treatment success',
+        'health recovery story',
+        'disease cure progress',
         
-        # Environment (broader)
-        'conservation success',
-        'renewable energy',
-        'wildlife recovery',
-        'clean energy',
+        # Environment - success focused
+        'conservation wins',
+        'endangered species saved',
+        'renewable energy breakthrough',
+        'ocean cleanup success',
+        'reforestation project',
         
-        # Human Interest (very broad)
-        'good news',
-        'inspiring story',
-        'heartwarming',
-        'community help',
-        'volunteers',
+        # Human Interest - positive only
+        'community comes together',
+        'volunteers make difference',
+        'stranger helps',
+        'heartwarming rescue',
+        'donation helps',
         
-        # Innovation & Tech
-        'innovation',
-        'sustainable technology',
-        'green technology',
+        # Education - achievement focused
+        'student wins award',
+        'scholarship program',
+        'education opportunity',
         
-        # Education & Achievement
-        'student achievement',
-        'education success',
-        'scholarship',
+        # Women - empowerment focused
+        'women-led startup',
+        'female scientist breakthrough',
+        'women empowerment program',
         
-        # Women & Empowerment
-        'women leaders',
-        'women in STEM',
-        'female entrepreneurs',
+        # Innovation - positive impact
+        'sustainable innovation',
+        'tech helping people',
+        'accessibility technology',
         
-        # Positive keywords
-        'celebration',
-        'achievement',
-        'recovery',
-        'rescue'
+        # Nature & Animals - gentle
+        'animal rescue success',
+        'wildlife sanctuary',
+        'baby animals born'
     ]
     
     processor = ContentProcessor()
