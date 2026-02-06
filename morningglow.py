@@ -1,13 +1,6 @@
 """
 MorningGlow: A Production-Grade Emotionally-Safe News Curator
 Delivers beautiful, verified positive news every morning.
-
-FIXES APPLIED:
-1. Improved URL validation to be less aggressive
-2. Better handling of Google News RSS redirect URLs
-3. Emergency stories now have unique IDs and are properly tracked
-4. Added debugging to identify pipeline failures
-5. Better deduplication logic
 """
 
 import os
@@ -19,7 +12,7 @@ from datetime import datetime, timedelta
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from typing import List, Dict, Optional, Tuple
-from urllib.parse import quote, urlparse
+from urllib.parse import quote
 from dotenv import load_dotenv
 import requests
 import feedparser
@@ -67,7 +60,7 @@ class SourceOrchestrator:
             
             if data.get('status') == 'ok':
                 articles = data.get('articles', [])
-                logger.info(f"✓ Fetched {len(articles)} articles from NewsAPI for query: {query}")
+                logger.info(f"Fetched {len(articles)} articles from NewsAPI for query: {query}")
                 return self._normalize_newsapi_articles(articles)
             else:
                 logger.error(f"NewsAPI error: {data.get('message', 'Unknown error')}")
@@ -90,19 +83,7 @@ class SourceOrchestrator:
                 try:
                     published = datetime(*entry.published_parsed[:6])
                     if published >= one_day_ago:
-                        # FIX: Handle Google News redirect URLs better
-                        url = entry.link.strip()
-                        
-                        # Try to extract actual URL from Google News redirect
-                        if 'news.google.com' in url:
-                            # Google News often wraps URLs - try to extract real URL
-                            try:
-                                if '&url=' in url:
-                                    actual_url = url.split('&url=')[1].split('&')[0]
-                                    from urllib.parse import unquote
-                                    url = unquote(actual_url)
-                            except:
-                                pass  # Use the Google News URL if extraction fails
+                        url = entry.link.replace(' ', '')
                         
                         articles.append({
                             'title': entry.title,
@@ -116,7 +97,7 @@ class SourceOrchestrator:
                     logger.debug(f"Error parsing RSS entry: {str(e)}")
                     continue
             
-            logger.info(f"✓ Fetched {len(articles)} articles from Google News RSS for query: {query}")
+            logger.info(f"Fetched {len(articles)} articles from Google News RSS for query: {query}")
             return articles
             
         except Exception as e:
@@ -127,10 +108,6 @@ class SourceOrchestrator:
         """Normalize NewsAPI articles to standard format."""
         normalized = []
         for article in articles:
-            # Skip articles with [Removed] content
-            if article.get('title') == '[Removed]' or article.get('description') == '[Removed]':
-                continue
-                
             normalized.append({
                 'title': article.get('title', ''),
                 'description': article.get('description', ''),
@@ -142,85 +119,33 @@ class SourceOrchestrator:
         return normalized
     
     def validate_url(self, url: str) -> bool:
-        """
-        FIX: Improved URL validation - less aggressive, accepts more legitimate sources.
-        """
+        """Validate that URL is accessible and legitimate."""
         if not url or not url.startswith('http'):
             return False
         
-        # Accept Google News URLs (they redirect to real articles)
-        if 'news.google.com' in url:
-            return True
-        
-        # Parse URL to check for obvious issues
         try:
-            parsed = urlparse(url)
-            if not parsed.netloc:
-                return False
-            
-            # Skip obvious bad domains
-            bad_domains = ['example.com', 'example.org', 'localhost', '127.0.0.1']
-            if any(bad in parsed.netloc.lower() for bad in bad_domains):
-                logger.debug(f"Rejected bad domain: {parsed.netloc}")
-                return False
-                
-        except Exception as e:
-            logger.debug(f"URL parse error for {url}: {e}")
+            response = requests.head(url, timeout=5, allow_redirects=True)
+            return response.status_code < 400
+        except Exception:
             return False
-        
-        # FIX: Make HEAD request optional and more forgiving
-        try:
-            # Only validate a sample of URLs to save time
-            response = requests.head(url, timeout=3, allow_redirects=True)
-            return response.status_code < 500  # Accept 4xx (like paywalls) but reject 5xx
-        except requests.exceptions.Timeout:
-            # Don't reject on timeout - the URL might still be valid
-            logger.debug(f"Timeout validating {url}, accepting anyway")
-            return True
-        except Exception as e:
-            # Be forgiving - accept URLs that can't be validated
-            logger.debug(f"Could not validate {url}: {e}, accepting anyway")
-            return True
     
     def fetch_all_sources(self, queries: List[str]) -> List[Dict]:
         """Fetch articles from all sources for multiple queries."""
         all_articles = []
         
         for query in queries:
-            # NewsAPI
             try:
                 articles = self.fetch_newsapi_articles(query)
                 if articles:
                     all_articles.extend(articles)
-                    logger.info(f"  Added {len(articles)} from NewsAPI for '{query}'")
             except Exception as e:
-                logger.error(f"NewsAPI failed for query '{query}': {e}")
+                logger.error(f"NewsAPI failed for query '{query}', continuing pipeline: {e}")
 
-            # Google News RSS
-            try:
-                rss_articles = self.fetch_google_news_rss(query)
-                if rss_articles:
-                    all_articles.extend(rss_articles)
-                    logger.info(f"  Added {len(rss_articles)} from Google RSS for '{query}'")
-            except Exception as e:
-                logger.error(f"Google RSS failed for query '{query}': {e}")
+            all_articles.extend(self.fetch_google_news_rss(query))
         
-        logger.info(f"Total articles before validation: {len(all_articles)}")
-        
-        # FIX: Validate only a sample to speed up processing
         validated_articles = []
-        for i, article in enumerate(all_articles):
-            url = article.get('url', '')
-            
-            # Quick validation for obviously bad URLs
-            if not url or 'example.com' in url:
-                continue
-                
-            # Validate every 5th URL, accept others
-            if i % 5 == 0:
-                if self.validate_url(url):
-                    validated_articles.append(article)
-            else:
+        for article in all_articles:
+            if article.get('url') and self.validate_url(article['url']):
                 validated_articles.append(article)
         
         logger.info(f"Total validated articles: {len(validated_articles)}")
@@ -237,7 +162,7 @@ class FactualAccuracyGuardian:
         'might', 'could', 'may', 'possibly', 'allegedly', 'rumor', 'rumour',
         'unconfirmed', 'speculation', 'claims without evidence', 'anonymous sources',
         'insider says', 'reportedly', 'sources say', 'could be', 'might be',
-        'potential', 'preliminary'
+        'potential', 'preliminary', 'early study', 'early results'
     ]
     
     CLICKBAIT_PATTERNS = [
@@ -283,10 +208,8 @@ class FactualAccuracyGuardian:
         
         full_text = f"{title} {description} {content}"
         
-        # Less aggressive speculation check
-        speculation_count = sum(1 for keyword in self.SPECULATION_KEYWORDS if keyword in full_text)
-        if speculation_count >= 3:  # Allow some speculation words
-            return False, "Too many speculation keywords"
+        if any(keyword in full_text for keyword in self.SPECULATION_KEYWORDS):
+            return False, "Contains speculation or unverified claims"
         
         for pattern in self.CLICKBAIT_PATTERNS:
             if re.search(pattern, full_text, re.IGNORECASE):
@@ -314,9 +237,9 @@ class FactualAccuracyGuardian:
             if is_accurate:
                 accurate_articles.append(article)
             else:
-                logger.debug(f"Rejected '{article.get('title', 'Unknown')[:50]}...': {reason}")
+                logger.debug(f"Rejected article '{article.get('title', 'Unknown')}': {reason}")
         
-        logger.info(f"Factual accuracy: {len(accurate_articles)}/{len(articles)} passed")
+        logger.info(f"Factual accuracy check: {len(accurate_articles)}/{len(articles)} passed")
         return accurate_articles
 
 
@@ -385,7 +308,7 @@ class EmotionalSafetyFilter:
     
     REJECT_KEYWORDS = [
         'crisis', 'shortage', 'suicide', 'violence', 'shooting', 'attack', 'murder',
-        'war', 'combat', 'battle', 'crime', 'corruption', 'scandal',
+        'war', 'combat', 'battle', 'conflict', 'crime', 'corruption', 'scandal',
         'controversy', 'disaster', 'catastrophe', 'emergency', 'threat', 'danger',
         'fear', 'terror', 'tragic', 'death toll', 'casualties', 'victim',
         'collapse', 'crash', 'failure', 'bankruptcy', 'layoff', 'recession',
@@ -435,6 +358,10 @@ class EmotionalSafetyFilter:
             if re.search(pattern, full_text, re.IGNORECASE):
                 return False, f"Contains crisis framing pattern"
         
+        if title in description or description in title:
+            if len(description) < len(title) * 1.5:
+                return False, "Description repeats headline"
+        
         return True, "Emotionally safe"
     
     def apply_amulya_filter(self, articles: List[Dict]) -> List[Dict]:
@@ -448,10 +375,10 @@ class EmotionalSafetyFilter:
             if has_category and is_safe:
                 article['amulya_categories'] = categories
                 filtered_articles.append(article)
-                logger.debug(f"✓ Accepted: '{article.get('title')}' - {', '.join(categories)}")
+                logger.debug(f"Accepted: '{article.get('title')}' - Categories: {', '.join(categories)}")
             else:
                 reason = safety_reason if not is_safe else "No matching category"
-                logger.debug(f"✗ Rejected: '{article.get('title', 'Unknown')[:50]}...' - {reason}")
+                logger.debug(f"Rejected: '{article.get('title', 'Unknown')}' - {reason}")
         
         logger.info(f"Amulya Filter: {len(filtered_articles)}/{len(articles)} passed")
         return filtered_articles
@@ -510,46 +437,69 @@ Write the summary now:"""
                 max_tokens=300
             )
             
-            summary = response.choices[0].message.content.strip()
-            return summary if summary else self._generate_fallback_summary(article)
+            summary = response.choices[0].message.content
+            if summary:
+                summary = summary.strip()
+            else:
+                return self._generate_fallback_summary(article)
+            
+            word_count = len(summary.split())
+            if word_count < 140 or word_count > 200:
+                logger.debug(f"Summary word count {word_count} outside ideal range 150-170")
+            
+            return summary
             
         except Exception as e:
             logger.error(f"Error generating OpenAI summary: {str(e)}")
             return self._generate_fallback_summary(article)
     
     def _generate_fallback_summary(self, article: Dict) -> str:
-        """Content-only fallback summary."""
+        """
+        Content-only fallback summary for when OpenAI is unavailable.
+        - Uses only sentences present in article content/description (no invented or tonal lines).
+        - Prefers up to 7 real sentences; will return fewer if the article lacks enough sentence content.
+        - Cleans HTML/URLs and enforces punctuation and a soft 170-word maximum.
+        """
         title = (article.get('title') or '').strip()
         description = (article.get('description') or '').strip()
         content = (article.get('content') or description or '').strip()
 
+        # If nothing to work with, return title or a very short neutral fallback
         if not content:
             return title or "A brief update for your morning."
 
+        # Clean HTML and links
         text = re.sub(r'<[^>]+>', '', content)
         text = re.sub(r'\s+', ' ', text).strip()
         text = re.sub(r'http[s]?://\S+', '', text).strip()
 
+        # Split into sentences (basic rule: split after . ? ! followed by space)
         raw_sentences = re.split(r'(?<=[\.\?\!])\s+', text)
 
+        # Keep only reasonably long sentences, remove trailing punctuation, trim
         sentences = []
         for s in raw_sentences:
             s_clean = s.strip()
+            # ignore very short fragments
             if len(s_clean) < 20:
                 continue
+            # drop trailing punctuation for normalized comparison
             s_clean = s_clean.rstrip('.!?').strip()
             if not s_clean:
                 continue
             sentences.append(s_clean)
 
+        # If nothing after sentence-splitting, try newline-based parts as a fallback
         if not sentences:
             parts = [p.strip() for p in re.split(r'[\r\n]+', text) if len(p.strip()) >= 20]
             sentences = [p.rstrip('.!?') for p in parts]
 
+        # Avoid sentences that just repeat the title verbatim
         lower_title = title.lower()
         if lower_title:
             sentences = [s for s in sentences if lower_title not in s.lower()]
 
+        # Deduplicate very similar entries (simple exact-match dedupe)
         seen = set()
         deduped = []
         for s in sentences:
@@ -560,8 +510,10 @@ Write the summary now:"""
             deduped.append(s)
         sentences = deduped
 
+        # Select up to 7 sentences (prefer earlier sentences)
         selected = sentences[:7]
 
+        # Ensure punctuation at the end of each sentence and capitalization
         def format_sent(s: str) -> str:
             s = s.strip()
             if not s:
@@ -577,6 +529,7 @@ Write the summary now:"""
         if not summary:
             return title or "A brief update for your morning."
 
+        # Soft truncate to 170 words (trim at word boundary, preserve punctuation)
         words = summary.split()
         if len(words) > 170:
             summary = ' '.join(words[:170]).rstrip()
@@ -608,22 +561,16 @@ class ContentProcessor:
     
     def process_news(self, queries: List[str]) -> List[Dict]:
         """Complete processing pipeline for news articles."""
-        logger.info("🌸 Starting news processing pipeline...")
+        logger.info("Starting news processing pipeline...")
         
         raw_articles = self.source_orchestrator.fetch_all_sources(queries)
         logger.info(f"Step 1: Fetched {len(raw_articles)} raw articles")
-        
-        if len(raw_articles) == 0:
-            logger.warning("⚠️ NO ARTICLES FETCHED! Check your API keys.")
         
         accurate_articles = self.accuracy_guardian.filter_accurate_articles(raw_articles)
         logger.info(f"Step 2: {len(accurate_articles)} articles passed accuracy check")
         
         safe_articles = self.safety_filter.apply_amulya_filter(accurate_articles)
         logger.info(f"Step 3: {len(safe_articles)} articles passed Amulya filter")
-        
-        if len(safe_articles) == 0:
-            logger.warning("⚠️ NO ARTICLES PASSED FILTERS! Will use emergency stories.")
         
         summarized_articles = self.summary_generator.generate_summaries_batch(safe_articles)
         logger.info(f"Step 4: Generated summaries for {len(summarized_articles)} articles")
@@ -633,43 +580,27 @@ class ContentProcessor:
 
 class StorySentTracker:
     """
-    FIX: Improved tracking with unique story IDs
+    Tracks stories sent in the last 24 hours to avoid repetition.
+    Stores sent article URLs with timestamps.
     """
     
     def __init__(self, tracking_file: str = 'sent_stories.json'):
         self.tracking_file = tracking_file
     
-    def _get_story_id(self, story: Dict) -> str:
-        """Generate unique ID for a story."""
-        # Use URL as primary ID, fall back to title hash
-        url = story.get('url', '')
-        if url and 'example.com' not in url:
-            return url
-        
-        title = story.get('title', '')
-        # For emergency stories, use title + timestamp day
-        if title:
-            day = datetime.now().strftime('%Y-%m-%d')
-            return f"emergency_{title[:50]}_{day}"
-        
-        return f"unknown_{datetime.now().timestamp()}"
-    
     def load_sent_stories(self) -> List[Dict]:
-        """Load stories sent in the last 7 days (extended from 24h)."""
+        """Load stories sent in the last 24 hours."""
         try:
             if not os.path.exists(self.tracking_file):
                 return []
             with open(self.tracking_file, 'r') as f:
                 all_sent = json.load(f)
             now = datetime.now().timestamp()
-            # Keep 7 days of history to prevent repetition
-            recent = [s for s in all_sent if s.get('sent_timestamp', 0) > now - (7 * 86400)]
+            recent = [s for s in all_sent if s.get('sent_timestamp', 0) > now - 86400]
             return recent
-        except:
-            return []
+        except: return []
     
     def save_sent_stories(self, stories: List[Dict]) -> None:
-        """Save newly sent stories with timestamp."""
+        """Save newly sent stories with timestamp - keep full history."""
         try:
             if not os.path.exists(self.tracking_file):
                 all_sent = []
@@ -679,72 +610,62 @@ class StorySentTracker:
                     
             now = datetime.now().timestamp()
             for story in stories:
-                story_id = self._get_story_id(story)
-                all_sent.append({
-                    'id': story_id,
-                    'url': story.get('url', ''),
-                    'title': story.get('title', ''),
-                    'sent_timestamp': now
-                })
+                all_sent.append({'url': story.get('url', ''), 'title': story.get('title', ''), 'sent_timestamp': now})
             
             with open(self.tracking_file, 'w') as f:
-                json.dump(all_sent, f, indent=2)
-            logger.info(f"✓ Tracked {len(stories)} new stories. Total history: {len(all_sent)}")
+                json.dump(all_sent, f, indent=2) 
+            logger.info(f"Tracked {len(stories)} new stories sent. Total history: {len(all_sent)}")
         except Exception as e:
             logger.warning(f"Could not save sent stories: {e}")
-    
-    def get_sent_ids(self) -> set:
-        """Get set of story IDs sent in last 7 days."""
-        return {s.get('id', '') for s in self.load_sent_stories() if s.get('id')}
+                
+    def get_sent_urls(self) -> set:
+        """Get set of URLs sent in last 24 hours."""
+        return {s.get('url', '') for s in self.load_sent_stories() if s.get('url')}
 
 
 class ContentGuarantee:
     """
-    FIX: Better emergency stories with unique tracking
+    Guarantees 3-5 beautiful stories are always available.
+    Uses emergency fallback stories when real-time news is insufficient.
     """
     
     EMERGENCY_STORIES = [
         {
-            'id': 'emergency_coral_1',
             'title': 'Ocean Guardians: Coral Reefs Show Remarkable Recovery',
             'summary': 'In the warm embrace of protected waters, coral reefs are painting a story of hope and resilience. Scientists have discovered that carefully nurtured marine sanctuaries are witnessing the gentle return of vibrant coral colonies, their colors blooming like underwater gardens. These delicate ecosystems, once thought to be beyond recovery, are now thriving with renewed life. The soft sway of healthy coral branches shelters countless species, creating safe havens beneath the waves. This beautiful transformation reminds us that with patient care and dedicated protection, nature possesses an extraordinary ability to heal and flourish once more.',
-            'url': 'https://oceanconservancy.org/blog/',
+            'url': 'https://oceanconservancy.org',
             'source': 'Ocean Conservation',
             'published_at': datetime.now().isoformat(),
             'amulya_categories': ['environment_healing']
         },
         {
-            'id': 'emergency_garden_1',
-            'title': 'A Community\'s Gentle Gift: Neighbors Create Beautiful Garden',
+            'title': 'A Community\'s Gentle Gift: Neighbors Create Beautiful Garden for Elderly Residents',
             'summary': 'In a heartwarming display of community love, neighbors came together to create something truly special. With gentle hands and caring hearts, they transformed a neglected space into a serene garden sanctuary for elderly residents. Soft petals of roses and lavender now greet visitors, while comfortable benches offer peaceful resting spots. The project brought together volunteers of all ages, each contributing their unique gifts to this labor of love. Now, seniors can enjoy morning sunshine surrounded by blooming flowers, butterflies dancing on the breeze, and the warm companionship of neighbors who truly care. This beautiful gesture shows how small acts of kindness can blossom into lasting joy.',
-            'url': 'https://www.good.is/articles/community-gardens',
+            'url': 'https://example.com/community-garden',
             'source': 'Community News',
             'published_at': datetime.now().isoformat(),
             'amulya_categories': ['human_kindness']
         },
         {
-            'id': 'emergency_students_1',
-            'title': 'Young Scientists Shine: Students\' Environmental Project Wins Recognition',
+            'title': 'Young Scientists Shine: Students\' Environmental Project Wins National Recognition',
             'summary': 'A group of dedicated students has captured hearts and minds with their innovative environmental project. These young changemakers designed a beautiful system to purify water using natural, sustainable materials. Their gentle approach combines scientific knowledge with deep care for the planet, creating solutions that work in harmony with nature. Teachers describe watching these students blossom as they worked together, supporting each other through challenges and celebrating every small victory. The project has now inspired other schools to embrace similar initiatives, spreading ripples of positive change. These bright young minds remind us that the future is in caring, capable hands, and that hope grows wherever passion meets purpose.',
-            'url': 'https://www.smithsonianmag.com/innovation/',
+            'url': 'https://example.com/student-achievement',
             'source': 'Education Today',
             'published_at': datetime.now().isoformat(),
             'amulya_categories': ['education_wins', 'environment_healing']
         },
         {
-            'id': 'emergency_butterfly_1',
             'title': 'Butterfly Haven: Restored Meadow Becomes Sanctuary for Endangered Species',
             'summary': 'A once-barren field has transformed into a breathtaking butterfly sanctuary, filled with gentle wings and colorful blooms. Conservation teams carefully planted native wildflowers, creating a soft tapestry of colors that dance in the breeze. Endangered butterfly species have returned to this haven, their delicate presence a sign of healing and hope. Visitors now walk among peaceful meadows, watching these beautiful creatures flutter from flower to flower. The sanctuary has become a place of wonder, where families can witness nature\'s quiet magic and children can learn about protecting our precious ecosystems. This transformation shows how dedication and gentle care can bring endangered beauty back to life.',
-            'url': 'https://www.xerces.org/blog',
+            'url': 'https://example.com/butterfly-sanctuary',
             'source': 'Wildlife Conservation',
             'published_at': datetime.now().isoformat(),
             'amulya_categories': ['environment_healing']
         },
         {
-            'id': 'emergency_women_energy_1',
             'title': 'Women-Led Initiative Brings Clean Energy to Rural Communities',
             'summary': 'A team of inspiring women engineers has created a beautiful solution that brings light and hope to remote villages. Their solar energy project combines technical excellence with deep compassion, ensuring that families can now enjoy clean, sustainable power. These remarkable women worked alongside community members, teaching and empowering them to maintain the systems themselves. The soft glow of solar-powered lights now illuminates homes, schools, and community centers, replacing the darkness with gentle, reliable brightness. Children can study in the evenings, and families can gather safely after sunset. This woman-led initiative demonstrates how innovation rooted in care and understanding can transform lives and create lasting positive change in the world.',
-            'url': 'https://www.un.org/en/climatechange/climate-solutions/renewable-energy',
+            'url': 'https://example.com/women-clean-energy',
             'source': 'Sustainable Future',
             'published_at': datetime.now().isoformat(),
             'amulya_categories': ['women_empowerment', 'ethical_innovation']
@@ -752,54 +673,487 @@ class ContentGuarantee:
     ]
     
     AFFIRMATIONS = [
-        "I am the woman who rises every time life tests me",
-        "I am built for expansion, evolution, and elevation",
-        "I am choosing myself with a conviction that cannot be shaken",
-        "I am becoming more powerful every time something challenges me",
-        "I am the universe's favorite girl and I walk like it",
-        "I am growing through what others get broken by",
-        "I am always protected, always aligned, always guided",
-        "I am the kind of woman who turns pain into portals",
-        "I am destined for a life so big it surprises even me",
-        "I am walking toward a future that is already mine"
+         "I am the woman who rises every time life tests me",
+"I am built for expansion, evolution, and elevation",
+"I am choosing myself with a conviction that cannot be shaken",
+"I am becoming more powerful every time something challenges me",
+"I am the universe’s favorite girl and I walk like it",
+"I am growing through what others get broken by",
+"I am always protected, always aligned, always guided",
+"I am the kind of woman who turns pain into portals",
+"I am destined for a life so big it surprises even me",
+"I am walking toward a future that is already mine",
+
+"I am worthy of everything I desire simply because I exist",
+"I am letting abundance flow to me without resistance",
+"I am attracting opportunities that match my highest self",
+"I am claiming the things I used to shy away from",
+"I am walking with a royalty mindset every day",
+"I am letting my confidence speak louder than my fear",
+"I am not asking permission to shine anymore",
+"I am becoming the version of me I always daydreamed about",
+"I am trusting myself even when I’m uncomfortable",
+"I am releasing every belief that tried to make me small",
+
+"I am divinely supported in everything I do",
+"I am magnetic to blessings, miracles, and breakthroughs",
+"I am the luckiest woman alive because I decide to be",
+"I am attracting success effortlessly because I embody it",
+"I am moving through life like everything bends for me",
+"I am worthy of desires that scare me",
+"I am ready for the abundance meant for me",
+"I am releasing doubt and stepping into destiny",
+"I am a powerful creator of my own life",
+"I am always in the right place at the right time",
+
+"I am not afraid of change because I evolve with ease",
+"I am guided toward everything that is meant for me",
+"I am trusting the process even when I can’t see the end",
+"I am allowed to take up limitless space",
+"I am aligning with higher versions of myself daily",
+"I am choosing growth over fear every single morning",
+"I am shifting into the woman who holds everything she prays for",
+"I am allowing my energy to speak before my words do",
+"I am bigger than any obstacle in front of me",
+"I am worthy of taking up space loudly and unapologetically",
+
+"I am embracing a future that feels like freedom",
+"I am prioritizing my peace, my power, and my standards",
+"I am the kind of woman who gets everything she asks for",
+"I am not settling for anything less than extraordinary",
+"I am becoming too aligned to be overlooked",
+"I am rewriting every story that tried to box me in",
+"I am receiving love, success, and abundance without guilt",
+"I am done doubting what I already know about myself",
+"I am the reason my life keeps getting better",
+"I am becoming unstoppable in every aspect of my life",
+
+"I am choosing myself with love and intention",
+"I am trusting that everything happening is happening for me",
+"I am open to receiving miracles in unexpected ways",
+"I am worthy of a life that feels deep, delicious, and divine",
+"I am blooming into someone powerful and grounded",
+"I am safe within myself even when life feels chaotic",
+"I am becoming the woman who inspires even her future self",
+"I am letting the universe work for me, not against me",
+"I am learning, unlearning, and evolving with grace",
+"I am embracing a mindset that feels like gold",
+
+"I am walking like the world was built for me to experience",
+"I am giving myself permission to want more",
+"I am becoming the type of woman who intimidates her old fears",
+"I am done shrinking myself for anyone",
+"I am stepping into my power with full awareness",
+"I am worthy of devotion, loyalty, and deep love",
+"I am attracting love that worships the ground I walk on",
+"I am choosing relationships that honor who I am",
+"I am a magnetic force of feminine power",
+"I am nurturing my spirit the way I deserve",
+
+"I am not afraid to redesign my life",
+"I am choosing abundance every single morning",
+"I am remembering who I am even on hard days",
+"I am rebuilding myself into someone unbreakable",
+"I am attracting experiences that elevate me",
+"I am choosing paths that align with my highest identity",
+"I am not moved by temporary chaos",
+"I am protected by karma and guided by intuition",
+"I am worthy of wealth that flows consistently",
+"I am shifting into a rich and abundant version of myself",
+
+"I am claiming opportunities without hesitation",
+"I am trusting that everything I desire is already on its way",
+"I am moving forward with clarity and certainty",
+"I am making choices aligned with my future self",
+"I am building a life that reflects my worth",
+"I am embracing confidence as my natural state",
+"I am no longer negotiating with my old identity",
+"I am stepping into my destiny fearlessly",
+"I am becoming a woman of strong standards and deeper boundaries",
+"I am aligned with the energy of massive success",
+
+"I am deserving of a love that feels like obsession and devotion",
+"I am attracting a partner who sees me as a universe",
+"I am worthy of a relationship that feels like home and fire",
+"I am letting myself desire deeply without apology",
+"I am choosing loyalty, depth, and passion",
+"I am receiving the kind of love people pray for",
+"I am becoming someone who attracts worship-level affection",
+"I am letting love show up fully for me",
+"I am trusting that the right person will choose me loudly",
+"I am walking toward the kind of love that mirrors my soul",
+
+"I am attracting stability in every area of my life",
+"I am choosing alignment over confusion",
+"I am moving with intention at every step",
+"I am deserving of a soft and abundant existence",
+"I am calling in wealth, luxury, and opportunities",
+"I am nurturing habits that empower my future",
+"I am expanding into a version of myself that feels limitless",
+"I am rewriting my life with clarity and power",
+"I am stepping into an identity that commands abundance",
+"I am becoming a magnet for everything meant for me",
+
+"I am no longer apologizing for wanting big things",
+"I am the creator of a life that feels unbelievable",
+"I am attracting luxury because my energy is luxury",
+"I am thinking like a queen because I am one",
+"I am trusting my intuition like a compass",
+"I am deserving of a future that feels cinematic",
+"I am aligning with goals that stretch and excite me",
+"I am celebrating every version of myself",
+"I am choosing discipline wrapped in self-love",
+"I am becoming the woman who makes her dreams normal",
+
+"I am a vessel of divine feminine power",
+"I am walking in a body guided by spirit and fire",
+"I am transforming pain into purpose effortlessly",
+"I am letting everything flow toward my highest good",
+"I am attracting miracles even in silence",
+"I am glowing differently because I’m healing differently",
+"I am proud of the woman I’m becoming",
+"I am stepping into seasons that honor my heart",
+"I am deserving of endings that lead to better beginnings",
+"I am trusting the universe more than my fears",
+
+"I am worthy of living in alignment with my truth",
+"I am moving with grace even when I feel overwhelmed",
+"I am becoming someone who inspires herself",
+"I am choosing gratitude as my frequency",
+"I am letting abundance rest within me",
+"I am the masterpiece and the work in progress",
+"I am capable of achieving everything I dream of",
+"I am surrounded by energy that supports my rise",
+"I am growing in ways I prayed for",
+"I am letting myself embody the life I want",
+
+"I am living with intention, clarity, and purpose",
+"I am trusting that everything is unfolding perfectly",
+"I am learning to love the process, not just the outcome",
+"I am releasing everything that does not serve the woman I’m becoming",
+"I am holding space for myself with softness",
+"I am showing up for my dreams consistently",
+"I am listening to the voice within me that knows the way",
+"I am claiming the abundance that belongs to me",
+"I am allowing myself to evolve without fear",
+"I am stepping into the fullness of who I am",
+
+"I am letting my energy lead the way",
+"I am worthy of love, wealth, peace, and fulfillment",
+"I am embracing each day as a chance to grow",
+"I am choosing myself even when it’s difficult",
+"I am building a mindset that attracts blessings",
+"I am ready for the success my future holds",
+"I am glowing with inner power and quiet certainty",
+"I am aligned with a higher timeline",
+"I am letting myself rise without resistance",
+"I am walking toward a life that feels like destiny",
+
+"I am trusting the timing of everything I desire",
+"I am deserving of a life that feels effortless",
+"I am becoming the woman who attracts everything she envisions",
+"I am embracing softness and strength together",
+"I am surrendering what harms me",
+"I am welcoming what heals me",
+"I am taking the steps my future self thanks me for",
+"I am breathing abundance into every choice I make",
+"I am building a future full of depth, love, and luxury",
+"I am ready for more because I was built for more",
+
+"I am releasing fear and embodying my highest self",
+"I am done doubting my power",
+"I am stepping into my greatness without hesitation",
+"I am attracting blessings left and right",
+"I am aligned with infinite opportunities",
+"I am moving with divine purpose",
+"I am letting success feel natural to me",
+"I am shifting into a life that honors my worth",
+"I am claiming everything that belongs to me",
+"I am unstoppable when I choose to be",
+
+"I am rewriting my story with elegance and certainty",
+"I am becoming someone impossible to shake",
+"I am deserving of a life that feels extraordinary",
+"I am allowing myself to receive with open hands",
+"I am rooted, powerful, and divinely guided",
+"I am done entertaining anything beneath my standards",
+"I am attracting the life I always dreamed of",
+"I am walking into days filled with clarity and confidence",
+"I am choosing the highest version of myself today",
+"I am ready for everything the universe has been saving for me",
+        "I am living on a frequency where everything rearranges itself for me",
+"I am the woman everything works out for, every single time",
+"I am constantly operating in divine timing and divine alignment",
+"I am the luckiest girl alive because my energy demands it",
+"I am the universe’s favorite and my life reflects that truth",
+"I am always supported by invisible forces that adore me",
+"I am walking on a path that cannot miss me",
+"I am attracting miracles because I speak the language of miracles",
+"I am tuned into a frequency where blessings chase me",
+"I am naturally chosen by opportunities that matter",
+
+"I am becoming stronger, wiser, and sharper with every challenge",
+"I am guided into rooms and timelines meant for my victory",
+"I am divinely orchestrated in ways I can’t even see yet",
+"I am always receiving answers at the perfect moment",
+"I am aligned with abundance without forcing anything",
+"I am effortlessly stepping into higher versions of myself",
+"I am transforming pressure into power",
+"I am the kind of woman whose destiny is undeniable",
+"I am connected to an inner wisdom that never fails me",
+"I am always held, always watched over, always protected",
+
+"I am attracting wealth with a mind that feels royal",
+"I am never without options because the universe prioritizes me",
+"I am letting money circulate to me with ease and respect",
+"I am the frequency of fortune and divine overflow",
+"I am energetically wealthy even before the money arrives",
+"I am being guided toward luxury, stability, and elevation",
+"I am receiving proof of my luck every single day",
+"I am allowing abundance to flow through me without resistance",
+"I am stepping into financial and spiritual wealth simultaneously",
+"I am wealthy because my energy feels like gold",
+
+"I am unshakeably confident in my destiny",
+"I am on the vibration where what I want wants me harder",
+"I am consistently chosen by opportunities aligned with my greatness",
+"I am becoming someone who never questions her worth",
+"I am the blueprint for a life that gets better and better",
+"I am worthy of sudden upgrades and unexpected blessings",
+"I am walking like I already have everything I desire",
+"I am connected to the timeline where I always win",
+"I am stepping into days where life feels effortless and abundant",
+"I am open to receiving everything I once thought was impossible",
+
+"I am becoming too aligned to ever be overlooked",
+"I am leaving behind energies that do not match my expansion",
+"I am choosing frequency over force, alignment over anxiety",
+"I am stepping into my goddess energy fully and unapologetically",
+"I am embodying the kind of power that feels calm and inevitable",
+"I am moving like someone who knows she is carried",
+"I am claiming the gifts the universe has already assigned to me",
+"I am becoming the woman everything flows to naturally",
+"I am letting my inner divinity guide every decision I make",
+"I am protected beyond my understanding",
+
+"I am walking with the confidence of someone who always rises",
+"I am choosing the timeline where I am deeply and endlessly lucky",
+"I am magnetizing people who treat me with devotion and respect",
+"I am attracting love that feels like worship and remembrance",
+"I am stepping into relationships that honor my soul",
+"I am the kind of woman who inspires obsession-level loyalty",
+"I am receiving the kind of love that feels fated and destined",
+"I am choosing standards that protect my heart and essence",
+"I am trusting that the right person will recognize me immediately",
+"I am letting my energy call in the kind of love I deserve",
+
+"I am always in the right place because I move with intuition",
+"I am thriving even in moments that once scared me",
+"I am becoming a woman who listens to her inner knowing",
+"I am reclaiming my power every time I choose peace",
+"I am walking with clarity even through chaos",
+"I am surrendering the things that are beneath my evolution",
+"I am allowing my life to unfold without fear controlling me",
+"I am leaning into growth that feels deep and transformative",
+"I am trusting myself more than ever before",
+"I am evolving at a pace that feels natural and divine",
+
+"I am bowing only to karma because karma keeps me safe",
+"I am letting the universe handle anything not meant for me",
+"I am releasing all battles that drain my divine energy",
+"I am protected from anything that isn't aligned with my soul",
+"I am walking with the quiet assurance that I am supported",
+"I am knowing that nothing meant for me will ever pass me",
+"I am letting my spirit lead the way toward blessings",
+"I am aligned with the version of me that always succeeds",
+"I am staying rooted in peace even when tested",
+"I am trusting that everything is unfolding in perfect order",
+
+"I am remembering my power even when I feel lost",
+"I am recalibrating every time I fall out of alignment",
+"I am using confusion as a compass for deeper clarity",
+"I am moving forward until new information finds me",
+"I am honoring the moments where I feel uncertain",
+"I am guided even when I cannot feel the guidance",
+"I am walking through fog with the confidence of a goddess",
+"I am finding direction in the stillest places",
+"I am trusting that lostness is temporary and purposeful",
+"I am rising into a clearer version of myself after every low",
+
+"I am learning faster than most people ever realize",
+"I am absorbing lessons that elevate me instantly",
+"I am evolving at a speed that surprises even me",
+"I am the kind of woman who levels up in days, not months",
+"I am becoming unstoppable because I adapt so quickly",
+"I am absorbing wisdom like it’s oxygen",
+"I am turning every setback into a tactical advantage",
+"I am rising from every challenge with upgraded strength",
+"I am always five steps ahead because my intuition is loud",
+"I am proud of how fast and fiercely I grow",
+
+"I am living a life where nothing is too expensive or out of reach",
+"I am attracting wealth that matches the size of my dreams",
+"I am choosing to think like someone who deserves everything",
+"I am letting the world respond to my sense of worth",
+"I am becoming the woman who walks into luxury naturally",
+"I am refusing to limit myself based on current circumstances",
+"I am letting my desires be instructions, not fantasies",
+"I am treating everything I want as destined, not distant",
+"I am choosing a life that feels rich in every way",
+"I am letting my standards shape my reality",
+
+"I am becoming someone who feels safe in her own skin",
+"I am loving myself with devotion and honesty",
+"I am proud of my instincts, morals, and convictions",
+"I am honoring myself even on days when it’s hard",
+"I am treating my reflection with admiration, not judgment",
+"I am falling in love with the woman I am becoming",
+"I am letting self-love be my foundation for everything",
+"I am choosing habits that honor my future",
+"I am celebrating my mind and spirit daily",
+"I am becoming someone I would worship if I met her",
+
+"I am attracting a future that feels cinematic and abundant",
+"I am aligned with timelines that feel too good to describe",
+"I am living in a reality where everything unfolds beautifully for me",
+"I am drawing in opportunities that multiply my power",
+"I am sitting on a frequency where everything works out perfectly",
+"I am deeply connected to the version of me who already made it",
+"I am stepping into the billionaire version of my destiny",
+"I am learning to trust the future I’m building",
+"I am becoming the woman who lives out her wildest dreams",
+"I am watching my manifestations arrive faster every day",
+
+"I am walking with feminine power that feels ancient and divine",
+"I am embodying the blend of softness and fire that defines me",
+"I am choosing to live as the goddess I know I am",
+"I am a channel for beauty, power, grace, and magic",
+"I am rewriting what femininity feels like for myself",
+"I am breathing life into my dreams with every step",
+"I am shifting into deeper versions of my own divinity",
+"I am aligning with energies that worship my presence",
+"I am choosing softness as my strength",
+"I am letting my feminine power guide the entire room"
+        "I am learning to love myself in deeper ways every single day",
+"I am treating myself like someone worth worshipping",
+"I am showing up for myself in ways no one else ever has",
+"I am choosing to be proud of the woman I look at in the mirror",
+"I am loving the parts of me that once felt unlovable",
+"I am falling in love with my voice, my power, my essence",
+"I am giving myself the devotion I used to expect from others",
+"I am becoming my own safest and softest place",
+"I am worthy of the kind of love I always dreamed of",
+"I am honoring myself like something divine",
+
+"I am loving my flaws because they helped shape my strength",
+"I am grateful for the woman I’ve become through hardship",
+"I am celebrating my softness because it makes me powerful",
+"I am choosing to love myself without conditions",
+"I am letting self-love be the foundation of everything I do",
+"I am treating my heart with patience, affection, and loyalty",
+"I am loving the way I think, the way I feel, the way I grow",
+"I am choosing to see myself as someone worth fighting for",
+"I am proud of how far I’ve come without giving up",
+"I am allowing self-love to guide every decision I make",
+
+"I am the love I used to beg for",
+"I am giving myself the attention I once chased",
+"I am the place my heart returns to for safety",
+"I am choosing myself even when it’s uncomfortable",
+"I am falling in love with my resilience and my rebellion",
+"I am letting my inner child feel seen and protected",
+"I am becoming someone I trust with my whole life",
+"I am loving my past selves for surviving long enough to grow",
+"I am celebrating my present self for evolving fearlessly",
+"I am honoring my future self with every step I take",
+
+"I am letting self-love be my loudest language",
+"I am worthy of tenderness from myself",
+"I am showing myself the loyalty I once begged others for",
+"I am giving my mind the respect it deserves",
+"I am learning to love my body in all its seasons",
+"I am treating my spirit with reverence",
+"I am speaking to myself with kindness, not cruelty",
+"I am healing the wounds I used to ignore",
+"I am letting love flow inward first",
+"I am loving myself in a way that feels like freedom",
+
+"I am embracing the woman I am becoming with open arms",
+"I am allowing myself to make mistakes without punishment",
+"I am choosing compassion over criticism",
+"I am letting my heart rest in its own hands",
+"I am loving myself in the quiet moments no one sees",
+"I am gifting myself peace whenever I need it",
+"I am worthy of taking care of myself intentionally",
+"I am allowing myself to be my own greatest love story",
+"I am choosing a life where I never abandon myself",
+"I am loving myself loudly, proudly, fearlessly",
+
+"I am learning to trust my own love more than external validation",
+"I am honoring my sensitivity as something sacred",
+"I am choosing to love myself even when I feel imperfect",
+"I am releasing shame that never belonged to me",
+"I am letting my heart feel safe inside my own presence",
+"I am teaching myself how to love better, softer, deeper",
+"I am embracing the parts of me I used to hide",
+"I am becoming the love I once thought I had to find",
+"I am choosing self-respect as my baseline",
+"I am building a relationship with myself that feels holy",
+
+"I am worthy of loving myself the way I crave to be loved",
+"I am treating my dreams as worthy because I am worthy",
+"I am becoming someone I would admire if I met her",
+"I am recognizing my beauty in every version of me",
+"I am loving the fire inside me that never goes out",
+"Iam letting my self-love be louder than my doubts",
+"I am worthy of gentleness even on my hardest days",
+"I am choosing to show up for myself with full devotion",
+"I am remembering that I am a blessing in human form",
+"I am loving myself in ways that feel like truth",
+
+"I am letting self-love be the reason I never shrink",
+"I am replacing self-judgment with self-honoring",
+"I am becoming too in love with myself to settle",
+"I am allowing my own affection to heal me",
+"Iam speaking to myself with the respect I deserve",
+"I am choosing to be kind to myself at every turn",
+"I am loving the parts of me that are still learning",
+"I am forgiving myself for the moments I didn’t know better",
+"I am embracing every version of myself with compassion",
+"I am choosing a life where I am my own priority",
+
+"I am the love that stays when everything else leaves",
+"I am building a home inside myself",
+"I am loving myself fiercely, gently, endlessly",
+"I am choosing to rise in ways that honor my worth",
+"I am making my self-love impossible to break",
+"I am letting my love for myself set the tone for my whole life",
+"I am worthy of being chosen by myself first",
+"I am choosing self-love as my lifelong commitment",
+"I am rooted in love for who I am and who I’m becoming",
+"I am celebrating myself because I am a miracle",
+"I am loving myself without hesitation, limit, or apology"
     ]
     
     def ensure_minimum_stories(self, articles: List[Dict], minimum: int = 3, maximum: int = 5) -> List[Dict]:
         """Ensure we have 3-5 stories, filtering out recently sent ones."""
         tracker = StorySentTracker()
-        sent_ids = tracker.get_sent_ids()
+        sent_urls = tracker.get_sent_urls()
         
-        # Filter out recently sent stories (check both URL and ID)
-        filtered_articles = []
-        for a in articles:
-            story_id = tracker._get_story_id(a)
-            if story_id not in sent_ids:
-                filtered_articles.append(a)
-        
-        logger.info(f"✓ Filtered {len(articles)-len(filtered_articles)} recently sent stories, {len(filtered_articles)} new available")
+        filtered_articles = [a for a in articles if a.get('url') not in sent_urls]
+        logger.info(f"Filtered {len(articles)-len(filtered_articles)} recently sent stories, {len(filtered_articles)} new available")
         
         if len(filtered_articles) >= minimum:
-            logger.info(f"✓ Sufficient new articles available: {len(filtered_articles)}")
+            logger.info(f"Sufficient new articles available: {len(filtered_articles)}")
             selected = filtered_articles[:maximum]
             tracker.save_sent_stories(selected)
             return selected
         
         needed = minimum - len(filtered_articles)
-        logger.warning(f"⚠️ Insufficient new articles ({len(filtered_articles)}). Adding {needed} emergency stories.")
+        logger.warning(f"Insufficient new articles ({len(filtered_articles)}). Adding {needed} emergency stories.")
         
-        # Select emergency stories that haven't been sent recently
         import random
-        available_emergency = []
-        for story in self.EMERGENCY_STORIES:
-            story_id = story.get('id', tracker._get_story_id(story))
-            if story_id not in sent_ids:
-                available_emergency.append(story)
-        
-        if len(available_emergency) < needed:
-            logger.warning(f"⚠️ All emergency stories recently used! Cycling through them anyway.")
-            available_emergency = self.EMERGENCY_STORIES
-        
-        emergency_selection = random.sample(available_emergency, min(needed, len(available_emergency)))
+        emergency_selection = random.sample(self.EMERGENCY_STORIES, min(needed, len(self.EMERGENCY_STORIES)))
         
         combined = filtered_articles + emergency_selection
         final_stories = combined[:maximum]
@@ -815,6 +1169,21 @@ class ContentGuarantee:
 class MorningEmailGuardian:
     """
     Weather + AQI aware email generator.
+
+    fetch_weather_and_aqi(...) returns a structured dict:
+      {
+        "location": "San Francisco",
+        "temp_c": 10.3,
+        "humidity": 86,
+        "summary": "Weather in San Francisco: 10°C, Humidity: 86%, AQI: Good (1).",
+        "aqi": {
+           "value": 1,                 # OpenWeatherMap index 1..5
+           "desc": "Good",
+           "components": { "pm2_5": 3.1, "pm10": 5.0, ... }
+        },
+        "advice": "Air quality is good..."
+      }
+    If weather cannot be fetched returns {"summary": "Weather data not available."}
     """
 
     def __init__(self):
@@ -823,45 +1192,71 @@ class MorningEmailGuardian:
         self.smtp_username = os.getenv('SMTP_USERNAME')
         self.smtp_password = os.getenv('SMTP_PASSWORD')
         self.from_email = os.getenv('FROM_EMAIL', self.smtp_username)
+        # Weather config
         self.openweather_key = os.getenv('OPENWEATHER_API_KEY')
         self.weather_city = os.getenv('WEATHER_CITY')
         self.weather_lat = os.getenv('WEATHER_LAT')
         self.weather_lon = os.getenv('WEATHER_LON')
+        # Optional device coords
         self.device_lat = os.getenv('DEVICE_LAT')
         self.device_lon = os.getenv('DEVICE_LON')
 
     def _geocode_city(self, city: str) -> Optional[Tuple[float, float]]:
         if not self.openweather_key or not city:
+            logger.debug("Geocode skipped: missing api key or city")
             return None
         url = "https://api.openweathermap.org/geo/1.0/direct"
-        candidates = [city.strip(), f"{city}, IN", f"{city}, India"]
+        candidates = [city.strip()]
+        city_lower = city.lower()
+        # helpful fallbacks for Bengaluru/Bangalore
+        if 'bangalore' in city_lower or 'bengaluru' in city_lower:
+            candidates += [f"{city}, IN", "Bengaluru, IN", "Bangalore, IN"]
+        else:
+            candidates += [f"{city}, IN", f"{city}, India"]
         for c in candidates:
             try:
                 resp = requests.get(url, params={'q': c, 'limit': 1, 'appid': self.openweather_key}, timeout=6)
                 resp.raise_for_status()
                 data = resp.json()
-                if data and len(data) > 0:
-                    return float(data[0]['lat']), float(data[0]['lon'])
-            except:
-                continue
+                if data and isinstance(data, list) and len(data) > 0:
+                    lat = data[0].get('lat')
+                    lon = data[0].get('lon')
+                    logger.debug(f"Geocode '{c}' -> lat={lat}, lon={lon}")
+                    if lat is not None and lon is not None:
+                        return float(lat), float(lon)
+                else:
+                    logger.debug(f"Geocode returned empty for '{c}'")
+            except Exception as e:
+                logger.debug(f"Geocoding attempt for '{c}' failed: {e}")
         return None
 
     def _resolve_coords(self, lat: Optional[float], lon: Optional[float], city: Optional[str]) -> Optional[Tuple[float, float]]:
+        # 1) explicit args
         if lat is not None and lon is not None:
-            return float(lat), float(lon)
+            try:
+                return float(lat), float(lon)
+            except Exception:
+                logger.debug("Invalid explicit lat/lon passed; falling through")
+        # 2) device env
         if self.device_lat and self.device_lon:
             try:
                 return float(self.device_lat), float(self.device_lon)
-            except:
-                pass
+            except Exception as e:
+                logger.debug(f"DEVICE_LAT/DEVICE_LON parse error: {e}")
+        # 3) explicit weather env
         if self.weather_lat and self.weather_lon:
             try:
                 return float(self.weather_lat), float(self.weather_lon)
-            except:
-                pass
+            except Exception as e:
+                logger.debug(f"WEATHER_LAT/WEATHER_LON parse error: {e}")
+        # 4) geocode
         target_city = (city or self.weather_city or "").strip()
         if target_city:
-            return self._geocode_city(target_city)
+            coords = self._geocode_city(target_city)
+            if coords:
+                return coords
+            else:
+                logger.debug(f"Geocoding failed for city '{target_city}'")
         return None
 
     def _owm_aqi_desc(self, value: Optional[int]) -> str:
@@ -881,14 +1276,20 @@ class MorningEmailGuardian:
         return adv.get(value, "")
 
     def fetch_weather_and_aqi(self, lat: Optional[float] = None, lon: Optional[float] = None, city: Optional[str] = None) -> Dict:
+        """
+        Returns structured weather + AQI dict, or {"summary": "Weather data not available."}
+        """
         if not self.openweather_key:
+            logger.warning("OPENWEATHER_API_KEY not configured. Skipping weather.")
             return {"summary": "Weather data not available."}
 
         resolved = self._resolve_coords(lat, lon, city)
         if not resolved:
+            logger.info("Weather coordinates not available (after resolution). Skipping weather.")
             return {"summary": "Weather data not available."}
         lat, lon = resolved
 
+        # Fetch current weather
         try:
             weather_url = "https://api.openweathermap.org/data/2.5/weather"
             w_resp = requests.get(weather_url, params={'lat': lat, 'lon': lon, 'appid': self.openweather_key, 'units': 'metric'}, timeout=6)
@@ -897,10 +1298,12 @@ class MorningEmailGuardian:
             temp = w.get('main', {}).get('temp')
             humidity = w.get('main', {}).get('humidity')
             location_name = city or self.weather_city or "your area"
+            logger.debug(f"Weather for {location_name}: temp={temp}, humidity={humidity}")
         except Exception as e:
-            logger.debug(f"Error fetching weather: {e}")
+            logger.debug(f"Error fetching current weather: {e}")
             return {"summary": "Weather data not available."}
 
+        # Fetch AQI (optional)
         aqi_value = None
         components = None
         try:
@@ -909,10 +1312,14 @@ class MorningEmailGuardian:
             a_resp.raise_for_status()
             a = a_resp.json()
             if a and 'list' in a and len(a['list']) > 0:
-                aqi_value = a['list'][0].get('main', {}).get('aqi')
-                components = a['list'][0].get('components', {})
-        except:
-            pass
+                main = a['list'][0].get('main', {})
+                aqi_value = main.get('aqi')  # 1..5
+                components = a['list'][0].get('components', {})  # pm2_5, pm10, no2, so2 etc
+                logger.debug(f"AQI for {location_name}: {aqi_value}, components: {components}")
+        except Exception as e:
+            logger.debug(f"AQI fetch non-fatal error: {e}")
+            aqi_value = None
+            components = None
 
         aqi_desc = self._owm_aqi_desc(aqi_value)
         parts = []
@@ -920,23 +1327,35 @@ class MorningEmailGuardian:
             parts.append(f"{round(temp)}°C")
         if humidity is not None:
             parts.append(f"Humidity: {humidity}%")
-        parts.append(f"AQI: {aqi_desc}" + (f" ({aqi_value})" if aqi_value else ""))
+        parts.append(f"AQI: {aqi_desc}" + (f" ({aqi_value})" if aqi_value is not None else ""))
 
         summary = f"Weather in {location_name}: " + ", ".join(parts) + "."
 
-        return {
+        result = {
             "location": location_name,
             "temp_c": temp,
             "humidity": humidity,
             "summary": summary,
-            "aqi": {"value": aqi_value, "desc": aqi_desc, "components": components or {}},
+            "aqi": {
+                "value": aqi_value,
+                "desc": aqi_desc,
+                "components": components or {}
+            },
             "advice": self._aqi_health_advice(aqi_value)
         }
+        return result
 
     def generate_html_email(self, stories: List[Dict], affirmation: str, greeting: str, weather_info) -> str:
+        """
+        Accepts weather_info as either a string (old behavior) or a dict (as returned above).
+        Renders AQI badge + components + advice when dict is provided.
+        """
         today = datetime.now().strftime('%B %d, %Y')
 
+        # Build weather HTML block
+               # Build weather HTML block
         weather_html = ""
+
         if isinstance(weather_info, dict):
             temp = weather_info.get("temp_c")
             humidity = weather_info.get("humidity")
@@ -959,6 +1378,7 @@ class MorningEmailGuardian:
         else:
             weather_html = "<p>Weather data not available.</p>"
 
+        # Build stories HTML (keeps previous style)
         stories_html = ""
         for i, story in enumerate(stories, 1):
             published_date = story.get('published_at', 'Date not available')
@@ -996,7 +1416,7 @@ class MorningEmailGuardian:
             {weather_html}
             <p style="color: #7d5e67; font-family: 'Georgia', sans-serif; font-size: 13px; margin: 6px 0 6px 0;">
                 We are incredibly grateful for another chance to rise now, aren't we?<br>
-                Here is your curated positive morning news:
+                      Here is your curated positive morning news:
             </p>
         </div>
         """
@@ -1028,14 +1448,17 @@ class MorningEmailGuardian:
         return html
 
     def send_email(self, to_email: str, subject: str, html_content: str) -> bool:
+        """Send the beautiful email (unchanged behavior)."""
         if not self.smtp_username or not self.smtp_password:
-            logger.warning("SMTP credentials not configured. Saving preview instead.")
+            logger.warning("SMTP credentials not configured. Email not sent.")
+            logger.info("Email HTML content would be (preview truncated):")
+            logger.info(html_content[:500] + "...")
             try:
                 safe_name = to_email.replace('@', '_at_').replace('.', '_')
                 with open(f'preview_email_{safe_name}.html', 'w', encoding='utf-8') as f:
                     f.write(html_content)
-                logger.info(f"✓ Email preview saved to preview_email_{safe_name}.html")
-            except:
+                logger.info(f"Email preview saved to preview_email_{safe_name}.html")
+            except Exception:
                 pass
             return False
         try:
@@ -1049,14 +1472,17 @@ class MorningEmailGuardian:
                 server.starttls()
                 server.login(self.smtp_username, self.smtp_password)
                 server.send_message(msg)
-            logger.info(f"✓ Email sent successfully to {to_email}")
+            logger.info(f"Email sent successfully to {to_email}")
             return True
         except Exception as e:
-            logger.error(f"✗ Error sending email to {to_email}: {str(e)}")
+            logger.error(f"Error sending email to {to_email}: {str(e)}")
             return False
 
     def deliver_morning_glow(self, recipients: List[str], stories: List[Dict], affirmation: str,
                              owner_email: str = None, recipient_locations: Optional[Dict[str, Dict]] = None) -> Dict[str, bool]:
+        """
+        Per-recipient weather/AQI: pass recipient_locations mapping (email -> {lat, lon} or {city: "..."}).
+        """
         results = {}
         subject = f"🌸 Your MorningGlow - {datetime.now().strftime('%B %d, %Y')}"
         if owner_email:
@@ -1074,6 +1500,7 @@ class MorningEmailGuardian:
             lon = override.get('lon')
             city = override.get('city')
 
+            # Get structured weather+AQI
             weather_info = self.fetch_weather_and_aqi(lat=lat, lon=lon, city=city)
             html_content = self.generate_html_email(stories, affirmation, greeting, weather_info)
             success = self.send_email(recipient, subject, html_content)
@@ -1081,10 +1508,15 @@ class MorningEmailGuardian:
 
         return results
 
-
 class SilentGuardian:
+    """
+    Handles errors silently to never disturb the user.
+    Ensures the ritual is never broken.
+    """
+    
     @staticmethod
     def safe_execute(func, *args, **kwargs):
+        """Execute function with silent error handling."""
         try:
             return func(*args, **kwargs)
         except Exception as e:
@@ -1093,6 +1525,7 @@ class SilentGuardian:
     
     @staticmethod
     def ensure_ritual(func):
+        """Decorator to ensure the morning ritual never breaks."""
         def wrapper(*args, **kwargs):
             try:
                 return func(*args, **kwargs)
@@ -1105,51 +1538,30 @@ class SilentGuardian:
 
 @SilentGuardian.ensure_ritual
 def sacred_morning_flow_with_accuracy():
+    """
+    The complete MorningGlow flow:
+    Fetch → Filter → Verify → Summarize → Guarantee → Email
+    """
     logger.info("=" * 60)
     logger.info("🌸 MorningGlow - Sacred Morning Flow Beginning 🌸")
     logger.info("=" * 60)
     
-    # BALANCED QUERIES - Specific enough to be positive, broad enough to get results
     search_queries = [
-        # Medical & Health - positive framing
-        'medical breakthrough approved',
-        'new treatment success',
-        'health recovery story',
-        'disease cure progress',
-        
-        # Environment - success focused
-        'conservation wins',
-        'endangered species saved',
-        'renewable energy breakthrough',
-        'ocean cleanup success',
-        'reforestation project',
-        
-        # Human Interest - positive only
-        'community comes together',
-        'volunteers make difference',
-        'stranger helps',
-        'heartwarming rescue',
-        'donation helps',
-        
-        # Education - achievement focused
-        'student wins award',
-        'scholarship program',
-        'education opportunity',
-        
-        # Women - empowerment focused
-        'women-led startup',
-        'female scientist breakthrough',
-        'women empowerment program',
-        
-        # Innovation - positive impact
-        'sustainable innovation',
-        'tech helping people',
-        'accessibility technology',
-        
-        # Nature & Animals - gentle
-        'animal rescue success',
-        'wildlife sanctuary',
-        'baby animals born'
+        'breakthrough medical discovery healing',
+        'women leaders innovation success',
+        'renewable energy milestone achievement',
+        'student wins national award',
+        'community volunteers together help',
+        'endangered species recovery wildlife',
+        'human kindness heartwarming story',
+        'clean water project development',
+        'education access opportunity',
+        'climate positive environmental win',
+        'mental health wellness progress',
+        'accessibility technology helping people',
+        'ocean conservation marine life',
+        'reforestation tree planting initiative',
+        'disaster relief community support'
     ]
     
     processor = ContentProcessor()
@@ -1159,21 +1571,22 @@ def sacred_morning_flow_with_accuracy():
     final_stories = guarantee.ensure_minimum_stories(processed_articles, minimum=3, maximum=5)
     affirmation = guarantee.get_daily_affirmation()
     
-    logger.info(f"✓ Final story count: {len(final_stories)}")
-    logger.info(f"✓ Daily affirmation selected")
+    logger.info(f"Final story count: {len(final_stories)}")
+    logger.info(f"Daily affirmation: {affirmation}")
     
     email_guardian = MorningEmailGuardian()
+    # RECIPIENT_EMAILS can be a comma-separated list
     recipients_env = os.getenv('RECIPIENT_EMAILS') or os.getenv('RECIPIENT_EMAIL') or 'user@example.com'
     recipients = [r.strip() for r in recipients_env.split(',') if r.strip()]
-    owner_email = os.getenv('OWNER_EMAIL')
+    owner_email = os.getenv('OWNER_EMAIL')  # set this to your own email so you get Goddess greeting
     
     results = email_guardian.deliver_morning_glow(recipients, final_stories, affirmation, owner_email=owner_email)
     
     for r, ok in results.items():
-        logger.info(f"{'✓' if ok else '✗'} Email to {r}: {'sent' if ok else 'preview saved'}")
+        logger.info(f"Email to {r}: {'sent' if ok else 'previewed/not-sent'}")
     
     logger.info("=" * 60)
-    logger.info("🌸 Sacred morning ritual complete 🌸")
+    logger.info("Sacred morning ritual complete. Peace and beauty prevail.")
     logger.info("=" * 60)
     
     return final_stories
